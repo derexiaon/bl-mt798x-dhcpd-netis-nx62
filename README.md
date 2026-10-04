@@ -6,8 +6,8 @@ BL2 + FIP (BL31 + U-Boot with a DHCP server and a failsafe web UI) for the
 **Netis NX62** (hardware twin of the **Netcore N60 Pro**): MT7986A, DDR4
 512 MB / 1 GB / 2 GB, 128 MB SPI-NAND (2 KB page, 128 KB block).
 
-The web UI shows the device as **Netis NX62**. The bootloader supports two
-flash layouts and switches between them when you flash firmware:
+One bootloader boots both the **stock firmware** and **official OpenWrt**.
+The flash layout is selected in the web UI when flashing firmware:
 
 | Layout (`mtd_layout`) | Firmware | `ubi` partition |
 | --- | --- | --- |
@@ -17,58 +17,63 @@ flash layouts and switches between them when you flash firmware:
 The start of the flash is the same for both layouts:
 `1024k(bl2),512k(u-boot-env),2048k(factory),2048k(fip)`.
 
-## Why earlier builds were unstable
+The bootloader is based on
+[Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd).
+This repository contains only the NX62 board files and patches; the upstream
+sources are downloaded at build time.
 
-1. **NMBM.** The stock firmware uses NMBM: its management tables live in the
-   last 8 MB of the flash. Official OpenWrt does not use NMBM and uses the
-   flash up to the end. A bootloader with NMBM (the `default` variant of
-   upstream, and the stock BL2) looks for these tables **on every boot** and,
-   if it can't find them, writes new ones at the end of the flash — right on
-   top of the official OpenWrt UBI blocks. That causes random UBI errors.
-   This build (`nonmbm` variant) accesses the NAND directly, like the official
-   OpenWrt bootloader: BL2 skips bad blocks (`_NAND_SKIP_BAD`), U-Boot uses
-   `spi-nand0`. The `default` layout never touches the NMBM area, so the stock
-   kernel keeps working with its tables.
-2. **Wrong layout in the DTS.** The previous attempt had
-   `factory_part = "factory"`. That is the partition *the web UI writes the
-   firmware to*, so the firmware would have overwritten the Wi-Fi calibration.
-   Also, `ubi` was `-(ubi)` on top of NMBM, and `sysupgrade_rootfs_ubipart`
-   pointed to a non-existent `rootfs_data` partition.
-3. **Layout switch while UBI is attached.** If UBI was already attached (e.g.
-   after a failed boot attempt), U-Boot could not recreate the partitions of
-   the new layout and wrote the firmware into the old `ubi` partition. Now UBI
-   is detached on a layout switch, and the `ubi` partition of the new layout
-   is erased before writing — nothing of the old layout survives.
-4. **TRNG.** ATF 2025/2026 restricts the hardware random number generator to
-   the secure world (access only via SMC). The stock kernel 5.4 reads the TRNG
-   registers directly and gets hwrng errors. For the NX62 the
-   `_MT7986_TRNG_NS_ACCESS` option is enabled: both direct access (stock) and
-   SMC (OpenWrt) work.
-5. **Outdated sources.** The fork was 482 commits behind upstream. Now the
-   sources are taken directly from the current upstream
-   [Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd)
-   (new SPI-NAND drivers, failsafe and TCP stack fixes). The previous full
-   source tree is kept in the `old-full-tree` branch.
+## Differences from upstream bl-mt798x-dhcpd
+
+**New board `netis_nx62`**
+
+- **No NMBM.** BL2 skips bad blocks (`_NAND_SKIP_BAD`) and U-Boot works on
+  the raw `spi-nand0`, like the official OpenWrt bootloader. Upstream
+  `netcore_n60-pro` (default variant) uses NMBM: on every boot it looks for the
+  NMBM tables in the last 8 MB of the flash and writes new ones if they are
+  missing, i.e. over the UBI blocks of official OpenWrt, which uses the flash
+  up to the end.
+- **Two layouts** (`default` and `openwrt`, see above) instead of a single
+  fixed one. The `default` layout never touches the NMBM area, so the stock
+  kernel keeps its NMBM tables.
+- The web UI shows the model as **Netis NX62**; LEDs match the OpenWrt DTS
+  (Wi-Fi LED on GPIO 1).
+- `MTK_FDT_BOOTARGS_FALLBACK`: if a layout has no command line, the kernel
+  gets the bootargs from its own FDT.
+
+**Fixes (patches)**
+
+- `0001` — **TRNG for the stock kernel.** ATF 2025/2026 restricts the
+  hardware random number generator to the secure world (SMC only). The stock
+  kernel 5.4 reads the TRNG registers directly and gets hwrng errors. The new
+  ATF option `_MT7986_TRNG_NS_ACCESS` (enabled for NX62) keeps both direct
+  access (stock) and the SMC interface (OpenWrt) working.
+- `0002` — **Clean layout switch.** If UBI is still attached to the old
+  layout (for example after a failed boot attempt), upstream U-Boot cannot
+  recreate the partitions and writes the firmware into the old `ubi`
+  partition. With the patch, UBI is detached on a layout switch, and the `ubi`
+  partition of the new layout is erased before writing.
+
+**Build checks**
+
+The build fails instead of producing an image if BL2 or U-Boot is built with
+NMBM, a layout is missing, the model is wrong, an image doesn't fit its
+partition, or a layout writes firmware to a partition other than `ubi`.
 
 ## Repository layout
-
-Only the NX62-specific files live here. The U-Boot and ATF sources are
-downloaded from upstream
-[Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd)
-at build time.
 
 | File | Purpose |
 | --- | --- |
 | `build.sh` | fetches upstream, adds the NX62 files, applies the patches, builds and verifies |
-| `board/mt7986a-netis-nx62.dts` | board description: model "Netis NX62", `default` and `openwrt` layouts, LEDs |
+| `board/mt7986a-netis-nx62.dts` | board description: model, layouts, LEDs |
 | `board/mt7986_netis_nx62_defconfig` | U-Boot config (single layout) |
 | `board/mt7986_netis_nx62_multi_layout_defconfig` | U-Boot config (multi-layout, the one used) |
 | `board/atf_mt7986_netis_nx62_defconfig` | BL2/BL31 config: DDR4, SPI-NAND without NMBM, TRNG for the stock kernel |
-| `patches/0001-…TRNG…patch` | ATF: option to let the stock kernel access the TRNG |
-| `patches/0002-…UBI…patch` | U-Boot: clean UBI rebuild on layout switch |
+| `patches/` | fixes on top of upstream |
 | `.github/workflows/build.yml` | GitHub Actions build |
 
-## Building with GitHub Actions
+## Building
+
+### GitHub Actions
 
 1. **Actions → Build Netis NX62 bootloader → Run workflow.**
 2. ATF version:
@@ -81,15 +86,9 @@ at build time.
 5. Result — artifact `netis_nx62-bootloader-<version>`:
    - `netis_nx62-<version>-bl2.img` — BL2 (`bl2` partition);
    - `netis_nx62-<version>-fip.bin` — BL31 + U-Boot (`fip` partition);
-   - `SHA256SUMS`, `upstream-commit.txt`, the README in both languages and
-     the build log.
+   - `SHA256SUMS`, `upstream-commit.txt`, the README and the build log.
 
-The build verifies its own output: BL2 and U-Boot without NMBM, both layouts
-present, model `Netis NX62`, image sizes, no layout writing firmware to a
-foreign partition. If anything is wrong, the build fails instead of producing
-an image.
-
-Locally (Ubuntu 24.04):
+### Locally (Ubuntu 24.04)
 
 ```sh
 sudo apt install build-essential bc bison flex gcc-aarch64-linux-gnu \
@@ -99,26 +98,23 @@ VERSION=2025 ./build.sh       # ATF 2025
 UPSTREAM_REF=master ./build.sh
 ```
 
-## Updating upstream
+### Updating upstream
 
-- Every Monday the workflow tries to build the NX62 on the latest upstream
-  `master`. If it fails, upstream changed something that needs fixing in the
-  patches or board files.
-- To move to a new version: run the build with `upstream_ref = master`, test
-  the bootloader and put the commit from `upstream-commit.txt` into
-  `UPSTREAM_PINNED` in `build.sh`.
-- There are no merge conflicts with upstream: the repository only contains
-  its own files.
+- The tested upstream commit is set by `UPSTREAM_PINNED` in `build.sh`.
+- Every Monday the workflow tries to build on the latest upstream `master`.
+  A failure means upstream changed something the patches or board files
+  depend on.
+- To move to a new version: build with `upstream_ref = master`, test the
+  bootloader and put the commit from `upstream-commit.txt` into
+  `UPSTREAM_PINNED`.
 
 ## Before flashing
 
 > **Warning.** Replacing BL2 can brick the router. Recovery after a failure
-> is only possible over UART with mtk_uartboot. Do it at your own risk. The
-> build has been verified by compilation and static checks, not on real
-> hardware.
+> is only possible over UART with mtk_uartboot. Do it at your own risk.
 
-- Flash **both** files: BL2 and FIP. The stock BL2 (and the BL2 of the
-  `default` variant) uses NMBM and will corrupt the official OpenWrt UBI.
+- Flash **both** files: BL2 and FIP. The stock BL2 uses NMBM and will corrupt
+  the official OpenWrt UBI.
 - Back up the `bl2`, `u-boot-env`, `factory` and `fip` partitions (better:
   the whole flash). `factory` holds the Wi-Fi calibration and MAC addresses
   and is unique to each router.
@@ -126,7 +122,7 @@ UPSTREAM_REF=master ./build.sh
   remapped any blocks (no NMBM bad/remapped block messages in `dmesg`). If
   blocks were remapped, data is not at the addresses a non-NMBM bootloader
   sees — do not flash.
-- The 512 MB NAND version (Chinese market) is not supported by this build.
+- The 512 MB NAND version (Chinese market) is not supported.
 
 ## Flashing the bootloader
 
@@ -149,7 +145,7 @@ mtd write netis_nx62-SP2-bl2.img bl2 && mtd verify netis_nx62-SP2-bl2.img bl2
 
 Do not reboot if `mtd verify` reports an error — write again.
 
-### If U-Boot from this repository is already installed
+### If this U-Boot is already installed
 
 In the failsafe web UI: **U-Boot update** page — `fip.bin`, **BL2 update**
 page — `bl2.img`.
@@ -160,7 +156,7 @@ Not directly: first install OpenWrt using one of the known guides (e.g.
 [SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools)),
 then proceed as above.
 
-## Entering the failsafe web UI
+## Failsafe web UI
 
 1. Power the router off, hold **Reset**, power it on and keep holding the
    button for a few seconds (the button is set by the `glbtn_key` variable,
@@ -194,8 +190,8 @@ on the **Load initramfs** page, without writing to flash.
 
 If firmware for the desired layout is already on the flash (e.g. you replaced
 the bootloader on a router running official OpenWrt), set `mtd_layout` =
-`openwrt` (or `default`) on the **Environment** page of the web UI, save and
-reboot. From the U-Boot console:
+`openwrt` (or `default`) on the **Environment** page, save and reboot. From
+the U-Boot console:
 
 ```
 setenv mtd_layout openwrt; setenv mtd_layout_label openwrt; saveenv; reset
@@ -210,33 +206,15 @@ official OpenWrt, U-Boot with the `default` layout simply fails to attach UBI
 The stock kernel looks for the NMBM tables in the last 8 MB of the flash,
 while official OpenWrt uses that area for UBI. After OpenWrt the NMBM tables
 are gone, and stock firmware only boots if its kernel can recreate NMBM. The
-reliable way back is therefore a **full flash backup taken while on stock**
-(**Backup** page), restored completely via **Flash** or UART. Stock-layout
-builds (Kwrt, ImmortalWrt mt798x) usually create NMBM themselves.
+reliable way back is a **full flash backup taken while on stock** (**Backup**
+page), restored completely via **Flash** or UART. Stock-layout builds (Kwrt,
+ImmortalWrt mt798x) usually create NMBM themselves.
 
-## Checking the Wi-Fi calibration (`factory` partition)
+## Credits and license
 
-On OpenWrt:
+- [Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd)
+  (based on hanwckf's bl-mt798x) — ATF, U-Boot, DHCP server and web UI.
+- [OpenWrt](https://github.com/openwrt/openwrt) — NX62 / N60 Pro DTS and
+  flash layout.
 
-```sh
-cat /proc/mtd                      # index of the "factory" partition, e.g. mtd2
-dd if=/dev/mtd2 of=/tmp/factory.bin
-ls -l /tmp/factory.bin             # 2097152 bytes
-hexdump -C -n 16 /tmp/factory.bin  # starts with "86 79" (MT7986), not "ff ff"
-hexdump -C -s 0x1fef20 -n 12 /tmp/factory.bin   # two MAC addresses, not ff
-dmesg | grep -i eeprom             # "use default bin" = calibration missing
-cmp /tmp/factory.bin /tmp/factory-backup.bin && echo IDENTICAL
-```
-
-From a whole-flash backup (exactly 134217728 bytes) the partition is extracted
-with:
-`dd if=full.bin of=/tmp/factory-backup.bin bs=64k skip=24 count=32`.
-
-Restore only if it differs and the backup is valid (2097152 bytes, starts
-with `86 79`):
-
-```sh
-apk update && apk add kmod-mtd-rw     # OpenWrt 24.10: opkg update && opkg install kmod-mtd-rw
-insmod mtd-rw i_want_a_brick=1
-mtd write /tmp/factory-backup.bin factory
-```
+GPL-2.0, see [LICENSE](LICENSE).
