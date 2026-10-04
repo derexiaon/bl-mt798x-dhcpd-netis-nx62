@@ -40,6 +40,8 @@ env:
   TZ: Asia/Shanghai
   UPLOAD_ARTIFACT: true
   UPLOAD_RELEASE: true
+  # Build configuration from inputs
+  CONFIG_GPT_TEMPLATE: ${{ github.event.inputs.GPT_TEMPLATE || 'false' }}
 
 jobs:
   build-gpt:
@@ -70,13 +72,36 @@ jobs:
           git clone $REPO_URL -b $REPO_BRANCH bl-mt798x-dhcpd
           ln -sf /workdir/bl-mt798x-dhcpd $GITHUB_WORKSPACE/bl-mt798x-dhcpd
 
+      - name: Generate .config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd bl-mt798x-dhcpd
+
+          # Generate .config for GPT build
+          echo "# CONFIG_BUILD_FIP is not set" > .config
+          echo "# CONFIG_BUILD_ATF is not set" >> .config
+          echo "CONFIG_BUILD_GPT=y" >> .config
+
+          # SILENT and BUILD_LOG defaults
+          echo "CONFIG_SILENT=y" >> .config
+          echo "CONFIG_BUILD_LOG=y" >> .config
+
+          # Run defconfig to fill in missing values
+          make defconfig 2>&1 || true
+
+          # Show final .config
+          echo "=== Generated .config ==="
+          cat .config
+          echo "========================="
+
       - name: Prepare GPT inputs
         shell: bash
         run: |
           set -euo pipefail
           cd bl-mt798x-dhcpd
 
-          if [ "${{ github.event.inputs.GPT_TEMPLATE }}" = "true" ]; then
+          if [ "$CONFIG_GPT_TEMPLATE" = "true" ]; then
             if [ -d "mt798x_gpt/template" ]; then
               echo "Enable template partition table: copy mt798x_gpt/template/* -> mt798x_gpt/"
               shopt -s dotglob nullglob
@@ -95,7 +120,8 @@ jobs:
           set -euo pipefail
           cd bl-mt798x-dhcpd
           chmod +x ./generate_gpt.sh
-          ./generate_gpt.sh
+          # Use make build target
+          make build 2>&1
           echo "FILE_DATE=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
 
@@ -145,7 +171,7 @@ jobs:
           echo "- Commit: ${{ github.sha }}" >> release.txt
           echo "- Source repo: ${{ env.REPO_URL }}" >> release.txt
           echo "- Branch: ${{ env.REPO_BRANCH }}" >> release.txt
-          if [ "${{ github.event.inputs.GPT_TEMPLATE }}" = "true" ]; then
+          if [ "$CONFIG_GPT_TEMPLATE" = "true" ]; then
             echo "- Template partition table: Enabled" >> release.txt
           else
             echo "- Template partition table: Disabled" >> release.txt

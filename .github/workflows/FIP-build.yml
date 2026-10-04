@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       MODEL:
-        description: 'Model selection'
+        description: 'Model selection (board name, "all", or "all-mt7981/7986/7987/7988")'
         required: true
-        default: 'cmcc_a10'
+        default: 'all'
         type: string
       FIP_VERSION: 
         description: 'FIP version selection ("all" option is only for single model builds)'
@@ -39,15 +39,44 @@ on:
           - nonmbm
           - openwrt
           - all
-      EXTRA_OPTION:
-        description: 'Extra option'
+      FSTHEME:
+        description: 'Failsafe theme'
         required: false
-        default: 'default'
+        default: 'bootstrap'
         type: choice
         options:
-          - default
+          - bootstrap
+          - gl
+          - mtk
+      EXTRA_OPTION:
+        description: 'Extra option (single_layout=MULTI_LAYOUT off+FIXED_MTDPARTS on, multi_layout=both on, dis_fixed_mtdparts=both off)'
+        required: false
+        default: 'multi_layout'
+        type: choice
+        options:
+          - single_layout
           - multi_layout
           - dis_fixed_mtdparts
+      COPY_BL2:
+        description: 'Copy BL2 image to output'
+        required: false
+        default: 'true'
+        type: boolean
+      SIMG:
+        description: 'Enable SIMG packaging'
+        required: false
+        default: 'false'
+        type: boolean
+      COMPRESS_FIP:
+        description: 'Compress FIP images (XZ)'
+        required: false
+        default: 'false'
+        type: boolean
+      BUILD_LOG:
+        description: 'Save build output to log file'
+        required: false
+        default: 'true'
+        type: boolean
       REPO_URL:
         description: 'Source repository'
         required: true
@@ -84,11 +113,15 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
-  # ATF and U-Boot versions mapping/path
-  atf24: atf-20240117-bacca82a8
-  atf25: atf-20250711
-  atf26: atf-20260123
-  uboot25: uboot-mtk-20250711
+  # Build configuration from inputs
+  CONFIG_MODEL: ${{ github.event.inputs.MODEL }}
+  CONFIG_VARIANT: ${{ github.event.inputs.VARIANT || 'default' }}
+  CONFIG_FSTHEME: ${{ github.event.inputs.FSTHEME || 'bootstrap' }}
+  CONFIG_EXTRA_OPTION: ${{ github.event.inputs.EXTRA_OPTION || 'multi_layout' }}
+  CONFIG_COPY_BL2: ${{ github.event.inputs.COPY_BL2 || 'true' }}
+  CONFIG_SIMG: ${{ github.event.inputs.SIMG || 'false' }}
+  CONFIG_COMPRESS_FIP: ${{ github.event.inputs.COMPRESS_FIP || 'false' }}
+  CONFIG_BUILD_LOG: ${{ github.event.inputs.BUILD_LOG || 'true' }}
 
 jobs:
   build:
@@ -107,10 +140,12 @@ jobs:
       run: |
         set -euo pipefail
 
-        VARIANT_IN="${{ github.event.inputs.VARIANT }}"
-        EXTRA_IN="${{ github.event.inputs.EXTRA_OPTION }}"
-        MODEL_IN="${{ github.event.inputs.MODEL }}"
+        VARIANT_IN="$CONFIG_VARIANT"
+        MODEL_IN="$CONFIG_MODEL"
+        FSTHEME_IN="$CONFIG_FSTHEME"
+        EXTRA_IN="$CONFIG_EXTRA_OPTION"
 
+        # Validate VARIANT
         case "$VARIANT_IN" in
           default|all|ubootmod|nonmbm|openwrt) ;;
           *)
@@ -118,36 +153,72 @@ jobs:
             exit 1
             ;;
         esac
-        if [ "$VARIANT_IN" = "all" ] && [ "$MODEL_IN" = "all" ]; then
-          echo "Error: VARIANT=all is only supported for single-model builds (MODEL must not be 'all')." >&2
+        if [ "$VARIANT_IN" = "all" ]; then
+          case "$MODEL_IN" in
+            all|all-mt7981|all-mt7986|all-mt7987|all-mt7988)
+              echo "Error: VARIANT=all is only supported for single-model builds (MODEL must be a specific board)." >&2
+              exit 1
+              ;;
+          esac
+        fi
+
+        # Keep the model selector flexible; invalid board names are resolved later
+        if [ -z "$MODEL_IN" ]; then
+          echo "Error: MODEL must not be empty." >&2
           exit 1
         fi
 
-
-        case "$EXTRA_IN" in
-          default|multi_layout|dis_fixed_mtdparts) ;;
+        case "$MODEL_IN" in
+          all)
+            echo "MODEL_BUILD_SCOPE=all" >> "$GITHUB_ENV"
+            ;;
+          all-mt7981)
+            echo "MODEL_BUILD_SCOPE=mt7981" >> "$GITHUB_ENV"
+            ;;
+          all-mt7986)
+            echo "MODEL_BUILD_SCOPE=mt7986" >> "$GITHUB_ENV"
+            ;;
+          all-mt7987)
+            echo "MODEL_BUILD_SCOPE=mt7987" >> "$GITHUB_ENV"
+            ;;
+          all-mt7988)
+            echo "MODEL_BUILD_SCOPE=mt7988" >> "$GITHUB_ENV"
+            ;;
           *)
-            echo "Error: invalid EXTRA_OPTION: '$EXTRA_IN' (expected default/multi_layout/dis_fixed_mtdparts)" >&2
+            echo "MODEL_BUILD_SCOPE=single" >> "$GITHUB_ENV"
+            ;;
+        esac
+
+        # Validate FSTHEME
+        case "$FSTHEME_IN" in
+          bootstrap|gl|mtk) ;;
+          *)
+            echo "Error: invalid FSTHEME: '$FSTHEME_IN' (expected bootstrap/gl/mtk)" >&2
             exit 1
             ;;
         esac
 
-        # Note: VARIANT is injected into build.sh only for uboot-2025 builds; EXTRA_OPTION applies to all versions
+        # Validate EXTRA_OPTION
+        case "$EXTRA_IN" in
+          single_layout|multi_layout|dis_fixed_mtdparts) ;;
+          *)
+            echo "Error: invalid EXTRA_OPTION: '$EXTRA_IN' (expected single_layout/multi_layout/dis_fixed_mtdparts)" >&2
+            exit 1
+            ;;
+        esac
+
+        # Validate FIP_VERSION
         FIP_INPUT="$FIP_VERSION_INPUT"
         FIP_INPUT="$(echo "$FIP_INPUT" | tr -d '\r' | sed -e 's/^[[:space:]]*//;s/[[:space:]]*$//')"
         if [[ "$FIP_INPUT" =~ ^(.+)-(mt798[0-9]+)$ ]]; then
           FIP_INPUT="${BASH_REMATCH[1]}"
         fi
-        if [ "$FIP_INPUT" != "all" ]; then
-          if ! echo ",${FIP_INPUT}," | grep -Eq ',(SP1|SP2|2025)(,|$)'; then
-            if [ "$VARIANT_IN" != "default" ] || [ "$EXTRA_IN" != "default" ]; then
-              if [ "$VARIANT_IN" != "default" ]; then
-                echo "Note: current FIP_VERSION=$FIP_INPUT does not include SP1/SP2/2025; VARIANT will be ignored (EXTRA_OPTION still applies)."
-              fi
-            fi
-          fi
+        if [ "$FIP_INPUT" != "all" ] && ! echo ",${FIP_INPUT}," | grep -Eq ',(SP1|SP2|2025)(,|$)'; then
+          echo "Error: unsupported FIP_VERSION '$FIP_INPUT' (supported: 2025/SP1/SP2/all)." >&2
+          exit 1
         fi
 
+        # Note: ubootmod/openwrt variants do not support multi_layout
         if [ "$EXTRA_IN" = "multi_layout" ]; then
           if [ "$VARIANT_IN" = "ubootmod" ] || [ "$VARIANT_IN" = "openwrt" ]; then
             echo "Note: VARIANT=$VARIANT_IN does not support multi_layout; MULTI_LAYOUT will be forced off."
@@ -233,6 +304,148 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
+    - name: Generate .config
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd bl-mt798x-dhcpd
+
+        # Create minimal .config in u-boot dir for kconfig tool build
+        # (u-boot build system requires .config to exist)
+        touch uboot-mtk-20250711/.config
+
+        # Generate default .config first
+        make defconfig 2>&1 || true
+
+        # Ensure .config exists (defconfig might fail)
+        touch .config
+
+        # Apply configuration from workflow inputs using Kconfig syntax
+        config_apply() {
+          local key="$1" value="$2"
+          if [ "$value" = "y" ]; then
+            # Enable bool option
+            sed -i "s/^# $key is not set\$/$key=y/" .config
+            if ! grep -q "^$key=" .config; then
+              echo "$key=y" >> .config
+            fi
+          elif [ "$value" = "n" ]; then
+            # Disable bool option
+            sed -i "s/^$key=y\$/# $key is not set/" .config
+          else
+            # Set string/int value
+            sed -i "s|^$key=.*|$key=$value|" .config
+            if ! grep -q "^$key=" .config; then
+              echo "$key=$value" >> .config
+            fi
+          fi
+        }
+
+        # Build selection
+        config_apply "CONFIG_BUILD_FIP" "y"
+        config_apply "CONFIG_BUILD_ATF" "n"
+        config_apply "CONFIG_BUILD_GPT" "n"
+        config_apply "CONFIG_COPY_BL2" "$([ "$CONFIG_COPY_BL2" = "true" ] && echo y || echo n)"
+
+        # Version selection (from FIP_VERSION_INPUT)
+        FIP_INPUT="$FIP_VERSION_INPUT"
+        FIP_INPUT="$(echo "$FIP_INPUT" | tr -d '\r' | sed -e 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [[ "$FIP_INPUT" =~ ^(.+)-(mt798[0-9]+)$ ]]; then
+          FIP_INPUT="${BASH_REMATCH[1]}"
+        fi
+
+        if [ "$FIP_INPUT" = "all" ]; then
+          # For "all" versions, default to 2025 (will be overridden per-version in build loop)
+          config_apply "CONFIG_VERSION_2025" "y"
+        else
+          config_apply "CONFIG_VERSION_2025" "n"
+          config_apply "CONFIG_VERSION_SP1" "n"
+          config_apply "CONFIG_VERSION_SP2" "n"
+          case "$FIP_INPUT" in
+            2025) config_apply "CONFIG_VERSION_2025" "y" ;;
+            SP1) config_apply "CONFIG_VERSION_SP1" "y" ;;
+            SP2) config_apply "CONFIG_VERSION_SP2" "y" ;;
+          esac
+        fi
+
+        # Board selection
+        config_apply "CONFIG_BUILD_ALL_BOARDS" "n"
+        config_apply "CONFIG_BUILD_ALL_MT7981" "n"
+        config_apply "CONFIG_BUILD_ALL_MT7986" "n"
+        config_apply "CONFIG_BUILD_ALL_MT7987" "n"
+        config_apply "CONFIG_BUILD_ALL_MT7988" "n"
+        case "${MODEL_BUILD_SCOPE:-single}" in
+          all)
+            config_apply "CONFIG_BUILD_ALL_BOARDS" "y"
+            ;;
+          mt7981)
+            config_apply "CONFIG_BUILD_ALL_MT7981" "y"
+            ;;
+          mt7986)
+            config_apply "CONFIG_BUILD_ALL_MT7986" "y"
+            ;;
+          mt7987)
+            config_apply "CONFIG_BUILD_ALL_MT7987" "y"
+            ;;
+          mt7988)
+            config_apply "CONFIG_BUILD_ALL_MT7988" "y"
+            ;;
+          *)
+            # Individual board will be set via MODEL_LIST
+            ;;
+        esac
+
+        # Variant selection
+        config_apply "CONFIG_VARIANT_DEFAULT" "n"
+        config_apply "CONFIG_VARIANT_UBOOTMOD" "n"
+        config_apply "CONFIG_VARIANT_NONMBM" "n"
+        config_apply "CONFIG_VARIANT_OPENWRT" "n"
+        case "$CONFIG_VARIANT" in
+          default) config_apply "CONFIG_VARIANT_DEFAULT" "y" ;;
+          ubootmod) config_apply "CONFIG_VARIANT_UBOOTMOD" "y" ;;
+          nonmbm) config_apply "CONFIG_VARIANT_NONMBM" "y" ;;
+          openwrt) config_apply "CONFIG_VARIANT_OPENWRT" "y" ;;
+          all) config_apply "CONFIG_VARIANT_DEFAULT" "y" ;;  # Default for "all" variants
+        esac
+
+        # Failsafe theme
+        config_apply "CONFIG_FSTHEME_BOOTSTRAP" "n"
+        config_apply "CONFIG_FSTHEME_GL" "n"
+        config_apply "CONFIG_FSTHEME_MTK" "n"
+        case "$CONFIG_FSTHEME" in
+          bootstrap) config_apply "CONFIG_FSTHEME_BOOTSTRAP" "y" ;;
+          gl) config_apply "CONFIG_FSTHEME_GL" "y" ;;
+          mtk) config_apply "CONFIG_FSTHEME_MTK" "y" ;;
+        esac
+
+        # EXTRA_OPTION: determines MULTI_LAYOUT and FIXED_MTDPARTS
+        # - single_layout: MULTI_LAYOUT=n, FIXED_MTDPARTS=y
+        # - multi_layout: MULTI_LAYOUT=y, FIXED_MTDPARTS=y
+        # - dis_fixed_mtdparts: MULTI_LAYOUT=n, FIXED_MTDPARTS=n
+        case "$CONFIG_EXTRA_OPTION" in
+          multi_layout)
+            config_apply "CONFIG_MULTI_LAYOUT" "y"
+            config_apply "CONFIG_FIXED_MTDPARTS" "y"
+            ;;
+          dis_fixed_mtdparts)
+            config_apply "CONFIG_MULTI_LAYOUT" "n"
+            config_apply "CONFIG_FIXED_MTDPARTS" "n"
+            ;;
+          *)
+            config_apply "CONFIG_MULTI_LAYOUT" "n"
+            config_apply "CONFIG_FIXED_MTDPARTS" "y"
+            ;;
+        esac
+        config_apply "CONFIG_SIMG" "$([ "$CONFIG_SIMG" = "true" ] && echo y || echo n)"
+        config_apply "CONFIG_COMPRESS_FIP" "$([ "$CONFIG_COMPRESS_FIP" = "true" ] && echo y || echo n)"
+        config_apply "CONFIG_SILENT" "y"
+        config_apply "CONFIG_BUILD_LOG" "$([ "$CONFIG_BUILD_LOG" = "true" ] && echo y || echo n)"
+
+        # Show final .config
+        echo "=== Generated .config ==="
+        cat .config
+        echo "========================="
+
     - name: Parse model lists
       run: |
         set -euo pipefail
@@ -257,60 +470,8 @@ jobs:
           echo "Will parse selected: ${SUPPORTED_VERSIONS[*]}"
         fi
 
-        version_to_dirs() {
-          local v="$1"
-          case "$v" in
-            2025) echo "${{ env.atf25 }}" "${{ env.uboot25 }}" ;;
-            SP1) echo "${{ env.atf24 }}" "${{ env.uboot25 }}" ;;
-            SP2) echo "${{ env.atf26 }}" "${{ env.uboot25 }}" ;;
-            *) echo "" "" ;;
-          esac
-        }
-
-        collect_models() {
-          local atf_dir="$1"
-          local uboot_dir="$2"
-          local atf_list
-          local uboot_list
-          atf_list=$(mktemp)
-          uboot_list=$(mktemp)
-
-          if [ -d "$atf_dir/configs" ]; then
-            find -L "$atf_dir/configs" -maxdepth 1 -type f -name 'mt798*_defconfig' | while read -r f; do
-              base=$(basename "$f")
-              base_no_ext=$(echo "$base" | sed -E 's/_defconfig$//')
-              if [ -n "$base_no_ext" ]; then
-                echo "$base_no_ext" >> "$atf_list"
-              fi
-            done
-          fi
-
-          if [ -d "$uboot_dir/configs" ]; then
-            find -L "$uboot_dir/configs" -maxdepth 1 -type f -name 'mt798*_defconfig' | while read -r f; do
-              base=$(basename "$f")
-              base_no_ext=$(echo "$base" | sed -E 's/_defconfig$//')
-              if [ -n "$base_no_ext" ]; then
-                echo "$base_no_ext" >> "$uboot_list"
-              fi
-            done
-          fi
-
-          if [ -s "$atf_list" ] && [ -s "$uboot_list" ]; then
-            sort -u "$atf_list" > "${atf_list}.sorted"
-            sort -u "$uboot_list" > "${uboot_list}.sorted"
-            comm -12 "${atf_list}.sorted" "${uboot_list}.sorted"
-          fi
-
-          rm -f "$atf_list" "$uboot_list" "${atf_list}.sorted" "${uboot_list}.sorted"
-        }
-
         for version in "${SUPPORTED_VERSIONS[@]}"; do
-          read -r ATF_DIR UBOOT_DIR < <(version_to_dirs "$version")
-          if [ -z "$ATF_DIR" ] || [ -z "$UBOOT_DIR" ]; then
-            echo "Unknown version mapping: $version, skip"
-            continue
-          fi
-          models=$(collect_models "$ATF_DIR" "$UBOOT_DIR" || true)
+          models=$(make -s board-configs VERSION="$version" || true)
           if [ -z "$models" ]; then
             echo "No available models found for $version: missing ATF/UBoot defconfig intersection, skipping"
             continue
@@ -330,8 +491,9 @@ jobs:
         echo "Generated model list files:"
         ls -l model_lists/
         for f in model_lists/model_list_*.txt; do
-          echo "List contents - $f:"
-          cat "$f" || echo "(empty)"
+          model_count=$(wc -l < "$f" 2>/dev/null || echo 0)
+          echo "List contents - $f: $model_count models"
+          cat "$f" | paste - - - - - || echo "(empty)"
         done
 
         echo "MODEL_LIST_DIR=$PWD/model_lists" >> $GITHUB_ENV
@@ -341,12 +503,8 @@ jobs:
       id: compile
       run: |
         cd bl-mt798x-dhcpd
-        chmod +x ./build.sh
         mkdir -p output
 
-        VARIANT_INPUT="${{ github.event.inputs.VARIANT }}"
-        EXTRA_INPUT="${{ github.event.inputs.EXTRA_OPTION }}"
-        
         FIP_INPUT="$FIP_VERSION_INPUT"
         FIP_INPUT="$(echo "$FIP_INPUT" | tr -d '\r' | sed -e 's/^[[:space:]]*//;s/[[:space:]]*$//')"
         SOC_FILTER=""
@@ -365,13 +523,24 @@ jobs:
           echo "Will build selected: ${SUPPORTED_VERSIONS[*]}"
         fi
 
-        MODEL_INPUT="${{ github.event.inputs.MODEL }}"
-        if [[ "$MODEL_INPUT" =~ ^all-(mt798[0-9]+)$ ]]; then
-          MODEL_INPUT="all"
-          if [ -z "$SOC_FILTER" ]; then
-            SOC_FILTER="${BASH_REMATCH[1]}"
-          fi
-          echo "Detected model input with platform filter: $SOC_FILTER (MODEL=all-mt798x)"
+        MODEL_INPUT="$CONFIG_MODEL"
+        case "$CONFIG_MODEL" in
+          all)
+            MODEL_INPUT="all"
+            ;;
+          all-mt7981|all-mt7986|all-mt7987|all-mt7988)
+            MODEL_INPUT="all"
+            SOC_FILTER="${CONFIG_MODEL#all-}"
+            echo "Detected model input with platform filter: $SOC_FILTER (MODEL=$CONFIG_MODEL)"
+            ;;
+        esac
+
+        # Determine variant list
+        VARIANT_INPUT="$CONFIG_VARIANT"
+        if [ "$VARIANT_INPUT" = "all" ]; then
+          VARIANTS_TO_BUILD=(default ubootmod nonmbm openwrt)
+        else
+          VARIANTS_TO_BUILD=($VARIANT_INPUT)
         fi
 
         # Compile each version and cache outputs in separate temp directories
@@ -395,9 +564,9 @@ jobs:
             fi
           fi
 
-          echo "Available models for ${version}:"
-          echo "$models" | tr '\n' ' '
-          echo
+          model_count=$(echo "$models" | wc -l)
+          echo "Available models for ${version}: $model_count models"
+          echo "$models" | paste - - - - -
 
           # Compile all if MODEL_INPUT=all, otherwise filter by model name suffix
           if [ "$MODEL_INPUT" = "all" ]; then
@@ -417,28 +586,17 @@ jobs:
             fi
           fi
 
-          # Decide variant list for this version (version priority first)
-          if [ "$version" = "2025" ] || [ "$version" = "SP1" ] || [ "$version" = "SP2" ]; then
-            if [ "$VARIANT_INPUT" = "all" ]; then
-              VARIANTS_TO_BUILD=(default ubootmod nonmbm openwrt)
-            else
-              VARIANTS_TO_BUILD=($VARIANT_INPUT)
-            fi
-          else
-            VARIANTS_TO_BUILD=(default)
-          fi
-
           for VARIANT in "${VARIANTS_TO_BUILD[@]}"; do
             for entry in $BUILD_MODELS; do
               soc="${entry%%_*}"
               model_name="${entry#*_}"
 
-              # EXTRA_OPTION: effects all versions
-              case "$EXTRA_INPUT" in
-                default)
-                  MULTI_LAYOUT=0
-                  FIXED_MTDPARTS=1
-                  ;;
+              # Calculate effective MULTI_LAYOUT and FIXED_MTDPARTS for this build
+              # - single_layout: MULTI_LAYOUT=0, FIXED_MTDPARTS=1
+              # - multi_layout: MULTI_LAYOUT=1, FIXED_MTDPARTS=1
+              # - dis_fixed_mtdparts: MULTI_LAYOUT=0, FIXED_MTDPARTS=0
+              # ubootmod/openwrt variants force MULTI_LAYOUT=0
+              case "$CONFIG_EXTRA_OPTION" in
                 multi_layout)
                   MULTI_LAYOUT=1
                   FIXED_MTDPARTS=1
@@ -447,16 +605,27 @@ jobs:
                   MULTI_LAYOUT=0
                   FIXED_MTDPARTS=0
                   ;;
+                *)
+                  MULTI_LAYOUT=0
+                  FIXED_MTDPARTS=1
+                  ;;
               esac
-
-              # variant ubootmod/openwrt does not support multi_layout
               if [ "$VARIANT" = "ubootmod" ] || [ "$VARIANT" = "openwrt" ]; then
                 MULTI_LAYOUT=0
               fi
 
               echo "Building FIP for version ${version} (SOC: $soc, model: $model_name, variant: $VARIANT)..."
-              BOARD="$model_name" VERSION=${version} VARIANT="$VARIANT" MULTI_LAYOUT="$MULTI_LAYOUT" FIXED_MTDPARTS="$FIXED_MTDPARTS" SILENT=Y ./build.sh 2>&1 | tee "output/build-${soc}-${model_name}-${version}-${VARIANT}.log"
-              build_rc=${PIPESTATUS[0]}
+              echo "  Config: MULTI_LAYOUT=$MULTI_LAYOUT, FIXED_MTDPARTS=$FIXED_MTDPARTS, FSTHEME=$CONFIG_FSTHEME"
+
+              # Use Makefile's build target with per-board override
+              # The .config is already set up; we just override BOARD and VERSION
+              if make BOARD="$model_name" VERSION="$version" VARIANT="$VARIANT" \
+                     MULTI_LAYOUT="$MULTI_LAYOUT" FIXED_MTDPARTS="$FIXED_MTDPARTS" \
+                     build 2>&1; then
+                build_rc=0
+              else
+                build_rc=$?
+              fi
 
               if [ "$build_rc" -ne 0 ]; then
                 echo "Build failed: soc=$soc model=$model_name version=$version variant=$VARIANT (rc=$build_rc), continuing to next"
@@ -556,15 +725,14 @@ jobs:
         echo "- Branch: ${{ env.REPO_BRANCH }}" >> release.txt
         echo "- Versions: $FIP_VERSION_INPUT" >> release.txt
 
-        echo "- Extra options: ${{ github.event.inputs.EXTRA_OPTION }}" >> release.txt
-
-        if [ "${{ github.event.inputs.VARIANT }}" = "all" ]; then
+        # Variant info
+        if [ "$CONFIG_VARIANT" = "all" ]; then
           echo "- Enabled ALL variants (default/ubootmod/nonmbm/openwrt)" >> release.txt
-        elif [ "${{ github.event.inputs.VARIANT }}" = "nonmbm" ]; then
+        elif [ "$CONFIG_VARIANT" = "nonmbm" ]; then
           echo "- Enabled NONMBM variant" >> release.txt
-        elif [ "${{ github.event.inputs.VARIANT }}" = "ubootmod" ]; then
+        elif [ "$CONFIG_VARIANT" = "ubootmod" ]; then
           echo "- Enabled UBOOTMOD variant" >> release.txt
-        elif [ "${{ github.event.inputs.VARIANT }}" = "openwrt" ]; then
+        elif [ "$CONFIG_VARIANT" = "openwrt" ]; then
           echo "- Enabled OPENWRT variant" >> release.txt
           echo "- OPENWRT variant with **NO failsafe WEB UI**" >> release.txt
           echo "- YOU NEED UPGRADE WITH TFTP METHOD" >> release.txt
@@ -572,14 +740,39 @@ jobs:
           echo "- Using DEFAULT variant" >> release.txt
         fi
 
-        if [ "${{ github.event.inputs.EXTRA_OPTION }}" = "dis_fixed_mtdparts" ]; then
-          echo "- FIXED_MTDPARTS disabled" >> release.txt
-        elif [ "${{ github.event.inputs.EXTRA_OPTION }}" = "multi_layout" ]; then
-          echo "- MULTI_LAYOUT enabled" >> release.txt
+        # Build options
+        echo "- Failsafe theme: $CONFIG_FSTHEME" >> release.txt
+        case "$CONFIG_EXTRA_OPTION" in
+          multi_layout)
+            echo "- MULTI_LAYOUT enabled, FIXED_MTDPARTS enabled" >> release.txt
+            ;;
+          dis_fixed_mtdparts)
+            echo "- MULTI_LAYOUT disabled, FIXED_MTDPARTS disabled" >> release.txt
+            ;;
+          *)
+            echo "- MULTI_LAYOUT disabled, FIXED_MTDPARTS enabled (single_layout)" >> release.txt
+            ;;
+        esac
+        if [ "$CONFIG_SIMG" = "true" ]; then
+          echo "- SIMG packaging enabled" >> release.txt
         fi
-        if [ "${{ github.event.inputs.MODEL }}" = "all" ]; then
-          echo "- Model list files for each version output (MODEL=all)" >> release.txt
+        if [ "$CONFIG_COMPRESS_FIP" = "true" ]; then
+          echo "- FIP compression (XZ) enabled" >> release.txt
         fi
+        if [ "$CONFIG_BUILD_LOG" = "true" ]; then
+          echo "- Build log enabled" >> release.txt
+        fi
+        if [ "$CONFIG_COPY_BL2" = "true" ]; then
+          echo "- Copy BL2 image enabled" >> release.txt
+        else
+          echo "- Copy BL2 image disabled" >> release.txt
+        fi
+
+        case "$CONFIG_MODEL" in
+          all|all-mt7981|all-mt7986|all-mt7987|all-mt7988)
+            echo "- Model list files for each version output (MODEL=$CONFIG_MODEL)" >> release.txt
+            ;;
+        esac
         echo "- Build time: ${{ env.FILE_DATE }}" >> release.txt
 
         echo "" >> release.txt
@@ -590,13 +783,12 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Publish to GitHub Release
-      uses: softprops/action-gh-release@v2.1.0
+      uses: softprops/action-gh-release@v3
       if: steps.tag.outputs.status == 'success' && !cancelled() && env.UPLOAD_RELEASE == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         files: bl-mt798x-dhcpd/upload/*
-        release_name: ${{ env.FILE_DATE }}-${{ env.UPLOAD_TAG_NAME }}
         name: ${{ env.FILE_DATE }}-${{ env.UPLOAD_TAG_NAME }}
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt

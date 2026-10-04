@@ -134,6 +134,9 @@
 #if defined(CONFIG_MTK_DHCPD)
 #include <net/mtk_dhcpd.h>
 #endif
+#if defined(CONFIG_MTK_DNSD)
+#include <net/mtk_dnsd.h>
+#endif
 
 /** BOOTP EXTENTIONS **/
 
@@ -460,8 +463,13 @@ int net_loop(enum proto_t protocol)
 	debug_cond(DEBUG_INT_STATE, "--- net_loop Entry\n");
 
 #ifdef CONFIG_NET_FORCE_IPADDR
-	net_ip = string_to_ip(CONFIG_IPADDR);
-	net_netmask = string_to_ip(CONFIG_NETMASK);
+	{
+		const char *env_ip = env_get("ipaddr");
+		const char *env_nm = env_get("netmask");
+
+		net_ip = string_to_ip((env_ip && env_ip[0]) ? env_ip : CONFIG_IPADDR);
+		net_netmask = string_to_ip((env_nm && env_nm[0]) ? env_nm : CONFIG_NETMASK);
+	}
 #endif
 
 #ifdef CONFIG_PHY_NCSI
@@ -509,6 +517,10 @@ restart:
 	 */
 	if (protocol == MTK_TCP)
 		mtk_dhcpd_start();
+#endif
+#if defined(CONFIG_MTK_DNSD)
+	if (protocol == MTK_TCP)
+		mtk_dnsd_start();
 #endif
 
 	if (!test_eth_enabled())
@@ -668,6 +680,9 @@ restart:
 	 *	Main packet reception loop.  Loop receiving packets until
 	 *	someone sets `net_state' to a state that terminates.
 	 */
+	{
+	bool net_abort_console = false;
+
 	for (;;) {
 		schedule();
 		if (arp_timeout_check() > 0)
@@ -687,8 +702,25 @@ restart:
 		eth_rx();
 
 #if defined(CONFIG_MTK_TCP)
-		if (protocol == MTK_TCP)
-			mtk_tcp_periodic_check();
+		/*
+		 * Always run mtk_tcp_periodic_check() so that existing
+		 * MTK TCP connections (httpd, telnetd) stay alive even
+		 * while another network command (tftpboot, ping, …) is
+		 * using net_loop().  Only terminate the loop when we are
+		 * actually serving MTK_TCP and all listeners are gone.
+		 */
+		if (mtk_tcp_periodic_check() && protocol == MTK_TCP)
+			net_set_state(NETLOOP_SUCCESS);
+
+		/*
+		 * Out-of-band console abort: a telnet session that received
+		 * Ctrl+C (or the web console "Abort" button) asked to stop
+		 * this network command.  The request is consumed here — at
+		 * loop level, outside any eth_rx() callback chain — and
+		 * handled below by the exact same code path as a serial
+		 * Ctrl+C (cleanup + eth_halt() + -EINTR).
+		 */
+		net_abort_console = mtk_tcp_abort_pending();
 #endif
 
 #if defined(CONFIG_PROT_TCP)
@@ -698,7 +730,7 @@ restart:
 		/*
 		 *	Abort if ctrl-c was pressed.
 		 */
-		if (ctrlc()) {
+		if (ctrlc() || net_abort_console) {
 			/* cancel any ARP that may not have completed */
 			net_arp_wait_packet_ip.s_addr = 0;
 
@@ -792,6 +824,7 @@ restart:
 		case NETLOOP_CONTINUE:
 			continue;
 		}
+	}
 	}
 
 done:

@@ -27,7 +27,7 @@
 
 #include "mtk_wget.h"
 #include "load_data.h"
-#include "colored_print.h"
+#include <failsafe/cprint.h>
 
 #define BUF_SIZE	1024
 
@@ -124,7 +124,14 @@ static int load_tftp(ulong addr, size_t *data_size, const char *env_name)
 	char file_name[CONFIG_SYS_CBSIZE + 1];
 	u32 size;
 #ifdef CONFIG_NET_FORCE_IPADDR
-	printf("U-Boot's IP address: %s, IP netmask: %s\n", CONFIG_IPADDR, CONFIG_NETMASK);
+	{
+		const char *env_ip = env_get("ipaddr");
+		const char *env_nm = env_get("netmask");
+
+		printf("U-Boot's IP address: %s, IP netmask: %s\n",
+		       (env_ip && env_ip[0]) ? env_ip : CONFIG_IPADDR,
+		       (env_nm && env_nm[0]) ? env_nm : CONFIG_NETMASK);
+	}
 #else
 	if (env_update("ipaddr", CONFIG_IPADDR,
 		       "Input U-Boot's IP address:", NULL, 0))

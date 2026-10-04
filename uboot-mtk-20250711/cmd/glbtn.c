@@ -232,6 +232,46 @@ static int glbtn_add_gpio_key(struct glbtn_key_item *keys, int *count,
 	return 0;
 }
 
+static int glbtn_show_help(void)
+{
+	printf("Usage:\n");
+	printf("  glbtn\n");
+	printf("  glbtn help|-h|--help\n\n");
+
+	printf("Description:\n");
+	printf("  Check configured button/GPIO states. If any key is held for 4 seconds,\n");
+	printf("  the command turns on system LED and runs httpd.\n\n");
+
+	printf("Environment variables:\n");
+	printf("  glbtn_key   Comma-separated button labels (button uclass labels).\n");
+	printf("              Example: setenv glbtn_key 'reset,wps'\n");
+	printf("              Default: reset\n");
+	printf("\n");
+	printf("  glbtn_gpio  Comma-separated GPIO names resolved by dm_gpio_lookup_name().\n");
+	printf("              Supports optional prefixes: gpio / pio\n");
+	printf("              Supports optional active-low override with '!'.\n");
+	printf("              Example: setenv glbtn_gpio 'gpio 12,!gpio 13'\n");
+	printf("\n");
+
+	printf("Notes:\n");
+	printf("  - reset key is always included as a fallback check item.\n");
+	printf("  - To persist env settings: saveenv\n");
+
+	return CMD_RET_SUCCESS;
+}
+
+static void glbtn_show_runtime_info(struct glbtn_key_item *keys, int key_count)
+{
+	int i;
+
+	printf("glbtn: checking ");
+	for (i = 0; i < key_count; i++) {
+		printf("%s%s", keys[i].label ? keys[i].label : "(null)",
+		       (i == key_count - 1) ? "" : ",");
+	}
+	printf("\n");
+}
+
 static int do_glbtn(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 {
 	char *button_label = NULL;
@@ -247,6 +287,18 @@ static int do_glbtn(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[
 	int pressed = 0;
 	bool active_low = true;
 	ulong ts;
+
+	if (argc > 2)
+		return CMD_RET_USAGE;
+
+	if (argc == 2) {
+		if (!strcmp(argv[1], "help") || !strcmp(argv[1], "-h") ||
+		    !strcmp(argv[1], "--help"))
+			return glbtn_show_help();
+
+		printf("Unknown argument: %s\n", argv[1]);
+		return CMD_RET_USAGE;
+	}
 
 	led_control("ledblink", "blink_led", "250");
 
@@ -297,6 +349,8 @@ static int do_glbtn(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[
 		return CMD_RET_FAILURE;
 	}
 
+	glbtn_show_runtime_info(keys, key_count);
+
 	if (!pressed) {
 		int i;
 		for (i = 0; i < key_count; i++) {
@@ -320,6 +374,7 @@ static int do_glbtn(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[
 	}
 
 	if (!pressed) {
+		printf("glbtn: no configured key is pressed (use 'glbtn help' for setup)\n");
 		poller_async_register(&led_p, "led_pa");
 		poller_call_async(&led_p, 1000000, led_action_post, NULL);
 		glbtn_free_keys(keys, key_count);
@@ -385,7 +440,10 @@ static int do_glbtn(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[
 }
 
 U_BOOT_CMD(
-	glbtn, 1, 0, do_glbtn,
+	glbtn, 2, 0, do_glbtn,
 	"GL-iNet button check",
-	""
+	"[help|-h|--help]\n"
+	"    - check button/GPIO press state\n"
+	"      env glbtn_key : comma-separated button labels, default reset\n"
+	"      env glbtn_gpio: comma-separated GPIO names for direct GPIO check"
 );

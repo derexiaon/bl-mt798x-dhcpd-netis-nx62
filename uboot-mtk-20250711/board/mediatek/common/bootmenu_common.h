@@ -17,6 +17,27 @@
 #define PART_FIP_NAME		"fip"
 #define PART_FIP2_NAME		"fip2"
 
+/**
+ * get_rf_part_name - Get the factory/RF calibration partition name
+ *
+ * When CONFIG_MTK_RF_PART_AUTO is enabled (default), returns "factory"
+ * and relies on alt_partname_factory() to try "Factory" as fallback.
+ *
+ * When auto-detection is disabled, returns the custom name from
+ * CONFIG_MTK_RF_PART_CUSTOM.
+ */
+static inline const char *get_rf_part_name(void)
+{
+	if (!IS_ENABLED(CONFIG_MTK_RF_PART_AUTO)) {
+#ifdef CONFIG_MTK_RF_PART_CUSTOM
+		return CONFIG_MTK_RF_PART_CUSTOM;
+#else
+		return "factory";
+#endif
+	}
+	return "factory";
+}
+
 struct mtd_info *get_mtd_part(const char *partname);
 
 int read_mtd_part(const char *partname, void *data, size_t *size,

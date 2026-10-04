@@ -24,7 +24,7 @@
 #include "image_helper.h"
 #include "upgrade_helper.h"
 #include "boot_helper.h"
-#include "colored_print.h"
+#include <failsafe/cprint.h>
 #include "verify_helper.h"
 #include "mtd_helper.h"
 #include "dual_boot.h"
@@ -34,6 +34,9 @@
 
 #define PART_FIT_NAME		"fit"
 #define PART_UBI_NAME		"ubi"
+#define PART_NVRAM_NAME		"nvram"
+#define PART_JFFS2_NAME		"jffs2"
+#define NVRAM_VOLUME_SIZE	126976	/* 1 LEB = 124 KiB */
 
 #define UBI_MOUNT_RECREATE	(!IS_ENABLED(CONFIG_MTK_DUAL_BOOT) && \
 				 !IS_ENABLED(CONFIG_MTK_BOOTMENU_UBI))
@@ -67,33 +70,76 @@ static char env_size[BOOT_PARAM_STR_MAX_LEN];
 static char env_offset[BOOT_PARAM_STR_MAX_LEN];
 #endif
 
+static bool mtdparts_fixed_enabled(void)
+{
+	bool use_fixed = IS_ENABLED(CONFIG_MTK_FIXED_MTD_MTDPARTS);
+	const char *val = env_get("mtdparts_fixed");
+
+	if (!val || !val[0])
+		return use_fixed;
+
+	if (!strcmp(val, "1") || !strcasecmp(val, "true") ||
+	    !strcasecmp(val, "yes") || !strcasecmp(val, "on"))
+		return true;
+
+	if (!strcmp(val, "0") || !strcasecmp(val, "false") ||
+	    !strcasecmp(val, "no") || !strcasecmp(val, "off"))
+		return false;
+
+	return use_fixed;
+}
+
+bool mtd_nmbm_enabled(void)
+{
+	bool use_nmbm = IS_ENABLED(CONFIG_ENABLE_NAND_NMBM);
+	const char *val = env_get("nmbm_enable");
+
+	if (!val || !val[0])
+		return use_nmbm;
+
+	if (!strcmp(val, "1") || !strcasecmp(val, "true") ||
+	    !strcasecmp(val, "yes") || !strcasecmp(val, "on"))
+		return true;
+
+	if (!strcmp(val, "0") || !strcasecmp(val, "false") ||
+	    !strcasecmp(val, "no") || !strcasecmp(val, "off"))
+		return false;
+
+	return use_nmbm;
+}
+
 void gen_mtd_probe_devices(void)
 {
-#ifdef CONFIG_MTK_FIXED_MTD_MTDPARTS
-	const char *mtdids = NULL, *mtdparts = NULL;
+	if (mtdparts_fixed_enabled()) {
+		const char *mtdids = NULL, *mtdparts = NULL;
 
 #if defined(CONFIG_SYS_MTDPARTS_RUNTIME)
-	board_mtdparts_default(&mtdids, &mtdparts);
+#ifdef CONFIG_MEDIATEK_MULTI_MTD_LAYOUT
+		/* Force runtime re-generation after layout switch in the same session */
+		env_set("mtdids", NULL);
+		env_set("mtdparts", NULL);
+#endif
+		board_mtdparts_default(&mtdids, &mtdparts);
 #else
 #if defined(MTDIDS_DEFAULT)
-	mtdids = MTDIDS_DEFAULT;
+		mtdids = MTDIDS_DEFAULT;
 #elif defined(CONFIG_MTDIDS_DEFAULT)
-	mtdids = CONFIG_MTDIDS_DEFAULT;
+		mtdids = CONFIG_MTDIDS_DEFAULT;
 #endif
 
 #if defined(MTDPARTS_DEFAULT)
-	mtdparts = MTDPARTS_DEFAULT;
+		mtdparts = MTDPARTS_DEFAULT;
 #elif defined(CONFIG_MTDPARTS_DEFAULT)
-	mtdparts = CONFIG_MTDPARTS_DEFAULT;
+		mtdparts = CONFIG_MTDPARTS_DEFAULT;
 #endif
 #endif
 
-	if (mtdids)
-		env_set("mtdids", mtdids);
+		if (mtdids)
+			env_set("mtdids", mtdids);
 
-	if (mtdparts)
-		env_set("mtdparts", mtdparts);
-#endif
+		if (mtdparts)
+			env_set("mtdparts", mtdparts);
+	}
 
 	mtd_probe_devices();
 }
@@ -1080,6 +1126,38 @@ static int write_ubi_itb_image(const void *data, size_t size,
 	if (ret)
 		return ret;
 
+	/*
+	 * Ensure nvram volume exists for ASUSWRT layout only.
+	 * ASUSWRT stores nvram configuration in a UBI volume that
+	 * must be present for the kernel to access. Other layouts
+	 * use plain MTD partitions for config storage.
+	 *
+	 * ASUSWRT also uses a "jffs2" UBI volume (UBIFS) for writable
+	 * user data (/jffs).  The kernel boots with root=/dev/ram0 so
+	 * rootfs_data overlay is *not* needed; it only wastes PEBs.
+	 */
+	if (env_get("mtd_layout") &&
+	    !strcmp(env_get("mtd_layout"), "asuswrt")) {
+		if (!ubi_find_volume(PART_NVRAM_NAME)) {
+			ret = create_ubi_volume(PART_NVRAM_NAME,
+						NVRAM_VOLUME_SIZE,
+						-1, false);
+			if (ret)
+				return ret;
+		}
+		/* Remove rootfs_data if it exists (unused, wastes space) */
+		if (ubi_find_volume(rootfs_data_part))
+			remove_ubi_volume(rootfs_data_part);
+		/* Create jffs2 (UBIFS user-data) volume with autoresize */
+		if (!ubi_find_volume(PART_JFFS2_NAME)) {
+			ret = create_ubi_volume(PART_JFFS2_NAME,
+						0, -1, true);
+			if (ret)
+				return ret;
+		}
+		return 0;
+	}
+
 	if (IS_ENABLED(CONFIG_MTK_DUAL_BOOT))
 		return mtd_dual_boot_post_upgrade(slot, rootfs_data_part);
 
@@ -1653,10 +1731,10 @@ int mtd_upgrade_image(const void *data, size_t size)
 	struct owrt_image_info ii;
 	struct mtd_info *mtd;
 	int ret;
-	const char *ubi_flash_part = PART_UBI_NAME;
 #endif
 
 #ifdef CONFIG_CMD_UBI
+	const char *ubi_flash_part = PART_UBI_NAME;
 	struct mtd_info *mtd_kernel;
 #ifdef CONFIG_MEDIATEK_MULTI_MTD_LAYOUT
 	struct mtd_info *mtd_ubikernel, *mtd_ubirootfs;
@@ -1749,10 +1827,10 @@ int mtd_boot_image(bool do_boot)
 {
 #if defined(CONFIG_CMD_UBI) || !defined(CONFIG_MTK_DUAL_BOOT)
 	struct mtd_info *mtd;
-	const char *ubi_boot_part = PART_UBI_NAME;
 #endif
 
 #ifdef CONFIG_CMD_UBI
+	const char *ubi_boot_part = PART_UBI_NAME;
 	struct mtd_info *mtd_kernel;
 
 	ubi_image_vol = NULL;

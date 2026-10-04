@@ -1,0 +1,222 @@
+mainmenu "bl-mt798x-dhcpd build configuration"
+
+menu "Build selection"
+
+config BUILD_FIP
+	bool "Build FIP via build.sh"
+	default y
+
+config BUILD_ATF
+	bool "Build ATF via compile_atf.sh"
+	default n
+
+config BUILD_GPT
+	bool "Build GPT via generate_gpt.sh"
+	default n
+
+choice
+	prompt "Build version"
+	default VERSION_2025
+
+config VERSION_2025
+	bool "2025"
+	help 
+	  Build the 2025 version of the firmware, which
+	  uses the TF-A 20250711 for the BL2 stage.
+
+config VERSION_SP1
+	bool "SP1"
+	help
+	  Build the SP1 version of the firmware, which
+	  uses the TF-A 20240117 for the BL2 stage.
+
+config VERSION_SP2
+	bool "SP2"
+	help
+	  Build the SP2 version of the firmware, which
+	  uses the TF-A 20260123 for the BL2 stage.
+endchoice
+
+endmenu
+
+menu "FIP build settings"
+
+source "boards.kconfig"
+
+choice
+	prompt "Variant"
+	default VARIANT_DEFAULT
+	help
+	  Normally, keep the default variant, which is suitable for most users.
+
+config VARIANT_DEFAULT
+	bool "default"
+	help
+	  Recommended for devices with stock/custom partition layout, enable
+	  MTK-NMBM(For MTD devices), adapted for stock/custom layout firmware.
+
+config VARIANT_NONMBM
+	bool "nonmbm"
+	help
+	  Recommended for devices with stock/custom partition layout, with MTK-NMBM disabled
+	  (For MTD devices), adapted for stock/custom layout firmware without MTK-NMBM.
+
+config VARIANT_UBOOTMOD
+	bool "ubootmod"
+	help
+	  With some modifications for better compatibility with OpenWrt/ImmortalWrt
+	  firmware(For MTD devices), suitable for ubootmod layout firmware.
+
+config VARIANT_UBI
+	bool "ubi"
+	help
+	  With some modifications for better compatibility with OpenWrt/ImmortalWrt
+	  firmware(For MTD devices), suitable for ubi layout firmware.
+
+config VARIANT_OPENWRT
+	bool "openwrt"
+	help
+	  From OpenWrt official respository, it has no failsafe web UI temporarily,
+	  adapted for OpenWrt official firmware.
+endchoice
+
+choice
+	prompt "Failsafe theme"
+	default FSTHEME_BOOTSTRAP
+
+config FSTHEME_BOOTSTRAP
+	bool "bootstrap"
+
+config FSTHEME_GL
+	bool "gl"
+
+config FSTHEME_MTK
+	bool "mtk"
+endchoice
+
+config MULTI_LAYOUT
+	bool "Enable multi-layout"
+	default y
+	help
+	  Enable runtime selection of multiple MTD partition layouts.
+	  This is intended for NAND-based boards that expose layout choices
+	  through the failsafe web UI and the mtd_layout environment variable.
+	  It has no effect on boards that do not use the multi-layout flow.
+
+config FIXED_MTDPARTS
+	bool "Enable fixed mtdparts"
+	default y
+	help
+	  Keep mtdids/mtdparts fixed to the build-time defaults when the
+	  storage layout is probed.
+	  Disable this only if you want the layout to be controlled at runtime
+	  through the environment, and understand the board-specific impact.
+
+config SIMG
+	bool "Enable SIMG packaging"
+	default n
+	help
+	  Enable the Single Image upgrade path in the failsafe web UI.
+	  This is a dangerous operation and should only be enabled when the
+	  device and image format are known to match.
+
+config UBIMNG
+	bool "Enable UBI management in failsafe"
+	default n
+	help
+	  Enable UBI volume management in the failsafe web UI.
+	  This is only useful on NAND/UBI builds and lets you inspect and
+	  manage UBI volumes from the browser UI.
+
+config TELNETD
+	bool "Enable telnet server in failsafe"
+	default y
+	help
+	  Enable the failsafe telnet server so you can access the U-Boot CLI
+	  over the network.
+	  Useful for debugging, but do not enable it on untrusted networks.
+
+config NAND_RAW
+	bool "Enable NAND raw/OOB backup and flash (DANGEROUS)"
+	default n
+	help
+	  Enable NAND raw mode in backup and flash editor that reads/writes
+	  pages including OOB (Out-Of-Band) spare area data via MTD_OPS_RAW.
+
+	  This preserves ECC layout and is required for byte-exact NAND dumps.
+
+	  WARNING: Raw mode requires significantly more memory (page_size +
+	  oob_size per page) and is only available on NAND flash devices.
+
+config COPY_BL2
+	bool "Copy BL2 after build"
+	default y
+
+config COMPRESS_FIP
+	bool "Compress FIP images (XZ)"
+	default n
+	help
+	  Compress BL31 and BL33 (U-Boot) inside FIP using XZ compression.
+	  Reduces fip.bin size by ~60%. Requires no BL2 change — decompressor
+	  is already built into BL2 and fallbacks to memcpy for non-compressed data.
+
+config SILENT
+	bool "Run scripts in silent mode"
+	default y
+
+config BUILD_LOG
+	bool "Save build output to log file"
+	default n
+	help
+	  When enabled, build output will be saved to output/build-<board>-<version>-<variant>.log.
+	  When disabled (default), build output is only shown on the console.
+
+endmenu
+
+menu "ATF build settings"
+
+config ATFCFG_DIR
+	string "ATF config directory"
+	default "mt798x_atf"
+
+config CFG_SUBDIR
+	string "ATF config subdirectory"
+	default ""
+
+config OUTPUT_DIR
+	string "ATF output directory"
+	default "output_bl2"
+
+config ATF_DIR
+	string "Override ATF source directory"
+	default ""
+
+config UBOOT_DIR
+	string "Override U-Boot source directory"
+	default ""
+
+endmenu
+
+menu "GPT build settings"
+
+config SHOW
+	bool "Show GPT layout"
+	default n
+	help
+	  Create a directory named `mt798x_gpt_bin` in the respository
+	  root directory, and put your GPT bin files in it.
+
+config GPT_DRAW
+	bool "Draw GPT partition diagram"
+	default n
+
+config GPT_DRAW_NOTITLE
+	bool "Hide title in GPT diagram"
+	default n
+	depends on GPT_DRAW
+
+config SDMMC
+	bool "Enable SDMMC GPT mode"
+	default n
+
+endmenu

@@ -15,8 +15,10 @@
  * - Small and self-contained
  */
 
-#include <common.h>
+#include <command.h>
+#include <env.h>
 #include <net.h>
+#include <vsprintf.h>
 
 #include <net/mtk_dhcpd.h>
 
@@ -59,6 +61,9 @@ struct dhcpd_pkt {
 #define DHCPREQUEST		3
 #define DHCPNAK			6
 #define DHCPACK			5
+#define DHCPDECLINE		4
+#define DHCPRELEASE		7
+#define DHCPINFORM		8
 
 #define DHCP_OPTION_PAD			0
 #define DHCP_OPTION_SUBNET_MASK	1
@@ -89,14 +94,34 @@ struct dhcpd_lease {
 };
 
 static struct dhcpd_lease leases[DHCPD_MAX_CLIENTS];
-static u32 next_ip_host;
 
 static rxhand_f *prev_udp_handler;
 static bool dhcpd_running;
 
+static bool dhcpd_is_verbose(void)
+{
+	const char *val = env_get("dhcpd_verbose");
+
+	if (!val || !val[0])
+		return false;
+
+	return !strcmp(val, "1") ||
+	       !strcasecmp(val, "true") ||
+	       !strcasecmp(val, "yes") ||
+	       !strcasecmp(val, "on");
+}
+
+#define dhcpd_log(fmt, ...) \
+	do { if (dhcpd_is_verbose()) printf(fmt, ##__VA_ARGS__); } while (0)
+
 static struct in_addr dhcpd_get_server_ip(void)
 {
 #ifdef CONFIG_MTK_DHCPD_USE_CONFIG_IP
+	const char *env_ip = env_get("ipaddr");
+
+	if (env_ip && env_ip[0])
+		return string_to_ip(env_ip);
+
 	return string_to_ip(CONFIG_IPADDR);
 #else
 	if (net_ip.s_addr)
@@ -109,6 +134,11 @@ static struct in_addr dhcpd_get_server_ip(void)
 static struct in_addr dhcpd_get_netmask(void)
 {
 #ifdef CONFIG_MTK_DHCPD_USE_CONFIG_IP
+	const char *env_nm = env_get("netmask");
+
+	if (env_nm && env_nm[0])
+		return string_to_ip(env_nm);
+
 	return string_to_ip(CONFIG_NETMASK);
 #else
 	if (net_netmask.s_addr)
@@ -136,6 +166,11 @@ static struct in_addr dhcpd_get_dns(void)
 
 static u32 dhcpd_get_pool_start_host(void)
 {
+	const char *val = env_get("dhcpd_pool_start");
+
+	if (val && val[0])
+		return (u32)simple_strtoul(val, NULL, 0);
+
 #ifdef CONFIG_MTK_DHCPD_USE_CONFIG_IP
 	return (u32)CONFIG_MTK_DHCPD_POOL_START_HOST;
 #else
@@ -145,6 +180,11 @@ static u32 dhcpd_get_pool_start_host(void)
 
 static u32 dhcpd_get_pool_size(void)
 {
+	const char *val = env_get("dhcpd_pool_size");
+
+	if (val && val[0])
+		return (u32)simple_strtoul(val, NULL, 0);
+
 #ifdef CONFIG_MTK_DHCPD_USE_CONFIG_IP
 	return (u32)CONFIG_MTK_DHCPD_POOL_SIZE;
 #else
@@ -210,7 +250,6 @@ static bool dhcpd_ip_in_pool(u32 ip_host)
 	return ip_host >= start && ip_host <= end;
 }
 
-#ifdef CONFIG_MTK_DHCPD_ENHANCED
 static bool dhcpd_ip_is_allocated(u32 ip_host)
 {
 	int i;
@@ -252,7 +291,6 @@ static u32 dhcpd_mac_hash(const u8 *mac)
 
 	return h;
 }
-#endif
 
 static struct in_addr dhcpd_alloc_ip(const u8 *mac)
 {
@@ -263,14 +301,16 @@ static struct in_addr dhcpd_alloc_ip(const u8 *mac)
 	u32 pool_size;
 
 	l = dhcpd_find_lease(mac);
-	if (l && dhcpd_ip_in_pool(ntohl(l->ip.s_addr)))
+	if (l && dhcpd_ip_in_pool(ntohl(l->ip.s_addr))) {
+		dhcpd_log("DHCP alloc: %pM already has lease %pI4\n",
+			  mac, &l->ip);
 		return l->ip;
+	}
 
 	dhcpd_get_pool_range(&start, &end);
 
 	pool_size = end >= start ? (end - start + 1) : 0;
 
-#ifdef CONFIG_MTK_DHCPD_ENHANCED
 	if (pool_size) {
 		u32 hash = dhcpd_mac_hash(mac);
 		u32 off = hash % pool_size;
@@ -283,27 +323,6 @@ static struct in_addr dhcpd_alloc_ip(const u8 *mac)
 			}
 		}
 	}
-#else
-	if (!next_ip_host)
-		next_ip_host = start;
-
-	for (i = 0; i < DHCPD_MAX_CLIENTS; i++) {
-		int idx;
-
-		idx = i;
-		if (!leases[idx].used) {
-			leases[idx].used = true;
-			memcpy(leases[idx].mac, mac, 6);
-			leases[idx].ip.s_addr = htonl(next_ip_host);
-
-			next_ip_host++;
-			if (next_ip_host > end)
-				next_ip_host = start;
-
-			return leases[idx].ip;
-		}
-	}
-#endif
 
 	/* No free slot: just return the first address in pool */
 	ip.s_addr = htonl(start);
@@ -411,7 +430,6 @@ static bool dhcpd_parse_req_ip(const struct dhcpd_pkt *bp, unsigned int len,
 	return false;
 }
 
-#ifdef CONFIG_MTK_DHCPD_ENHANCED
 static bool dhcpd_parse_server_id(const struct dhcpd_pkt *bp, unsigned int len,
 			      struct in_addr *server_ip)
 {
@@ -494,7 +512,6 @@ static bool dhcpd_same_subnet(struct in_addr a, struct in_addr b,
 {
 	return (a.s_addr & mask.s_addr) == (b.s_addr & mask.s_addr);
 }
-#endif
 
 static u8 *dhcpd_opt_add_u8(u8 *p, u8 code, u8 val)
 {
@@ -598,6 +615,12 @@ static int dhcpd_send_reply(const struct dhcpd_pkt *req, unsigned int req_len,
 
 	net_send_packet(pkt, eth_hdr_size + IP_UDP_HDR_SIZE + payload_len);
 
+	dhcpd_log("DHCP %s to %pM yiaddr=%pI4 siaddr=%pI4\n",
+		  dhcp_msg_type == DHCPOFFER ? "OFFER" :
+		  dhcp_msg_type == DHCPACK   ? "ACK"   :
+		  dhcp_msg_type == DHCPNAK   ? "NAK"   : "?",
+		  req->chaddr, &yiaddr, &server_ip);
+
 	return 0;
 }
 
@@ -631,6 +654,16 @@ static void dhcpd_handle_packet(uchar *pkt, unsigned int dport,
 	if (!msg_type)
 		return;
 
+	dhcpd_log("DHCP %s from %pM xid=0x%08x",
+		  msg_type == DHCPDISCOVER ? "DISCOVER" :
+		  msg_type == DHCPREQUEST  ? "REQUEST"  :
+		  msg_type == DHCPDECLINE  ? "DECLINE"  :
+		  msg_type == DHCPRELEASE  ? "RELEASE"  :
+		  msg_type == DHCPINFORM   ? "INFORM"   : "?",
+		  bp->chaddr, ntohl(bp->xid));
+	dhcpd_log(" flags=0x%04x ciaddr=%pI4\n",
+		  ntohs(bp->flags), &bp->ciaddr);
+
 	debug_cond(DEBUG_DEV_PKT, "dhcpd: msg=%u from %pM\n", msg_type, bp->chaddr);
 
 	switch (msg_type) {
@@ -640,8 +673,6 @@ static void dhcpd_handle_packet(uchar *pkt, unsigned int dport,
 		dhcpd_send_reply(bp, len, DHCPOFFER, yiaddr, NULL);
 		break;
 	case DHCPREQUEST:
-
-#ifdef CONFIG_MTK_DHCPD_ENHANCED
 		{
 			struct in_addr server_id;
 			struct in_addr server_ip = dhcpd_get_server_ip();
@@ -683,20 +714,6 @@ static void dhcpd_handle_packet(uchar *pkt, unsigned int dport,
 			dhcpd_process_lease(bp->chaddr, yiaddr);
 			dhcpd_send_reply(bp, len, DHCPACK, yiaddr, NULL);
 		}
-#else
-		/* If client requests a specific IP, validate it */
-		if (dhcpd_parse_req_ip(bp, len, &req_ip)) {
-			u32 ip_host = ntohl(req_ip.s_addr);
-			if (dhcpd_ip_in_pool(ip_host)) {
-				yiaddr = req_ip;
-			} else {
-				yiaddr = dhcpd_alloc_ip(bp->chaddr);
-			}
-		} else {
-			yiaddr = dhcpd_alloc_ip(bp->chaddr);
-		}
-		dhcpd_send_reply(bp, len, DHCPACK, yiaddr, NULL);
-#endif
 		break;
 	default:
 		break;
@@ -746,12 +763,28 @@ int mtk_dhcpd_start(void)
 
 	dhcpd_get_pool_range(&pool_start_host, &pool_end_host);
 	pool_start.s_addr = htonl(pool_start_host);
-	next_ip_host = ntohl(pool_start.s_addr);
 
 	prev_udp_handler = net_get_udp_handler();
 	net_set_udp_handler(dhcpd_udp_handler);
 
 	dhcpd_running = true;
+
+	dhcpd_log("DHCP server started\n");
+	dhcpd_log("  Server IP  : %pI4\n", &net_ip);
+	dhcpd_log("  Netmask    : %pI4\n", &net_netmask);
+	dhcpd_log("  Gateway    : %pI4\n", &net_gateway);
+	dhcpd_log("  DNS        : %pI4\n", &net_dns_server);
+	dhcpd_log("  Pool       : %d.%d.%d.%d - %d.%d.%d.%d\n",
+		  (pool_start_host >> 24) & 0xff,
+		  (pool_start_host >> 16) & 0xff,
+		  (pool_start_host >> 8) & 0xff,
+		  pool_start_host & 0xff,
+		  (pool_end_host >> 24) & 0xff,
+		  (pool_end_host >> 16) & 0xff,
+		  (pool_end_host >> 8) & 0xff,
+		  pool_end_host & 0xff);
+	dhcpd_log("  Leases     : %d max\n", DHCPD_MAX_CLIENTS);
+	dhcpd_log("  Verbose    : on (setenv dhcpd_verbose 0 to disable)\n");
 
 	return 0;
 }
@@ -770,4 +803,43 @@ void mtk_dhcpd_stop(void)
 		net_set_udp_handler(prev_udp_handler);
 	prev_udp_handler = NULL;
 	dhcpd_running = false;
+
+	dhcpd_log("DHCP server stopped\n");
 }
+
+bool mtk_dhcpd_is_running(void)
+{
+	return dhcpd_running;
+}
+
+static int do_dhcpd(struct cmd_tbl *cmdtp, int flag, int argc,
+		    char *const argv[])
+{
+	if (argc < 2)
+		return CMD_RET_USAGE;
+
+	if (!strcmp(argv[1], "start")) {
+		if (mtk_dhcpd_start())
+			printf("Failed to start DHCP server\n");
+
+		return CMD_RET_SUCCESS;
+	}
+
+	if (!strcmp(argv[1], "stop")) {
+		mtk_dhcpd_stop();
+		return CMD_RET_SUCCESS;
+	}
+
+	return CMD_RET_USAGE;
+}
+
+U_BOOT_CMD(dhcpd, 2, 0, do_dhcpd,
+	"Control DHCP server",
+	"start - start DHCP server\n"
+	"dhcpd stop - stop DHCP server\n\n"
+	"Environment:\n"
+	"  dhcpd_verbose      - set to 1/true/yes/on to enable detailed console output\n"
+	"                       (pool info, every DHCP request/reply, lease allocation)\n"
+	"  dhcpd_pool_start   - first host index of the DHCP pool (decimal or 0x..)\n"
+	"  dhcpd_pool_size    - number of addresses in the DHCP pool"
+);

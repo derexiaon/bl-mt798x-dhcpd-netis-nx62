@@ -11,7 +11,7 @@
 #include <u-boot/crc.h>
 
 #include "bootmenu_common.h"
-#include "colored_print.h"
+#include <failsafe/cprint.h>
 #include "mmc_helper.h"
 #include "bl2_helper.h"
 #include "fip_helper.h"
@@ -24,6 +24,9 @@
 
 static const char *alt_partname_factory(const char *partname)
 {
+	if (!IS_ENABLED(CONFIG_MTK_RF_PART_AUTO))
+		return NULL;
+
 	if (!partname)
 		return NULL;
 
@@ -322,7 +325,7 @@ int generic_mmc_write_gpt(void *priv, const struct data_part_entry *dpe,
 int generic_mmc_write_factory(void *priv, const struct data_part_entry *dpe,
 			      const void *data, size_t size)
 {
-	return write_mmc_part("factory", data, size, true);
+	return write_mmc_part(get_rf_part_name(), data, size, true);
 }
 
 int generic_mmc_validate_fw(void *priv, const struct data_part_entry *dpe,

@@ -11,9 +11,8 @@
 #endif
 #include <linux/mtd/spinand.h>
 
-/* ESMT uses GigaDevice 0xc8 JECDEC ID on some SPI NANDs */
-#define SPINAND_MFR_ESMT_C8			0xc8
 #define SPINAND_MFR_ESMT_8C			0x8c
+#define SPINAND_MFR_ESMT_C8			0xc8
 
 static SPINAND_OP_VARIANTS(read_cache_variants,
 			   SPINAND_PAGE_READ_FROM_CACHE_X4_OP(0, 1, NULL, 0),
@@ -105,6 +104,43 @@ static const struct mtd_ooblayout_ops f50l1g41lb_ooblayout = {
 	.rfree = f50l1g41lb_ooblayout_free,
 };
 
+/*
+ * ecc bits: 0xC0[4,6]
+ * [0b000], No bit errors were detected;
+ * [0b001] and [0b011], 1~6 Bit errors were detected and corrected. Not
+ *	reach Flipping Bits;
+ * [0b101], Bit error count equals the bit flip
+ *	detection threshold
+ * [0b010], Multiple bit errors were detected and
+ *	not corrected.
+ * others, Reserved.
+ */
+static int esmt_ecc_get_status(struct spinand_device *spinand,
+					 u8 status)
+{
+	struct nand_device *nand = spinand_to_nand(spinand);
+	u8 eccsr = (status & GENMASK(6, 4)) >> 4;
+
+	if (eccsr <= 1 || eccsr == 3)
+		return eccsr;
+	else if (eccsr == 5)
+		return nand->eccreq.strength;
+	else
+		return -EBADMSG;
+}
+
+static const struct spinand_info esmt_8c_spinand_table[] = {
+	SPINAND_INFO("F50L1G41LC",
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_DUMMY, 0x2C),
+		     NAND_MEMORG(1, 2048, 64, 64, 1024, 20, 1, 1, 1),
+		     NAND_ECCREQ(1, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     0,
+		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, esmt_ecc_get_status)),
+};
+
 static const struct spinand_info esmt_c8_spinand_table[] = {
 	SPINAND_INFO("F50L1G41LB",
 		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x01),
@@ -114,7 +150,7 @@ static const struct spinand_info esmt_c8_spinand_table[] = {
 					      &write_cache_variants,
 					      &update_cache_variants),
 		     0,
-		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, NULL)),
+		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, esmt_ecc_get_status)),
 	SPINAND_INFO("F50D1G41LB",
 		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x11),
 		     NAND_MEMORG(1, 2048, 64, 64, 1024, 20, 1, 1, 1),
@@ -123,32 +159,65 @@ static const struct spinand_info esmt_c8_spinand_table[] = {
 					      &write_cache_variants,
 					      &update_cache_variants),
 		     0,
-		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, NULL)),
+		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, esmt_ecc_get_status)),
 	SPINAND_INFO("F50D2G41KA",
-		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x51, 0x7f,
-				0x7f, 0x7f),
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x51),
 		     NAND_MEMORG(1, 2048, 128, 64, 2048, 40, 1, 1, 1),
 		     NAND_ECCREQ(8, 512),
 		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
 					      &write_cache_variants,
 					      &update_cache_variants),
 		     0,
-		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, NULL)),
-};
-
-static const struct spinand_info esmt_8c_spinand_table[] = {
-	SPINAND_INFO("F50L1G41LC",
-		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x2C),
-			 NAND_MEMORG(1, 2048, 64, 64, 1024, 20, 1, 1, 1),
+		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, esmt_ecc_get_status)),
+	SPINAND_INFO("F50L2G41KA",
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x41),
+		     NAND_MEMORG(1, 2048, 128, 64, 2048, 40, 1, 1, 1),
+		     NAND_ECCREQ(8, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     0,
+		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, esmt_ecc_get_status)),
+	SPINAND_INFO("F50L2G41LB",
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x0a),
+		     NAND_MEMORG(1, 2048, 64, 64, 1024, 20, 1, 1, 2),
 		     NAND_ECCREQ(1, 512),
 		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
 					      &write_cache_variants,
 					      &update_cache_variants),
 		     0,
-		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, NULL)),
+		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, esmt_ecc_get_status)),
+	SPINAND_INFO("F50L512M41A",
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x20),
+		     NAND_MEMORG(1, 2048, 64, 64, 512, 20, 1, 1, 1),
+		     NAND_ECCREQ(1, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     0,
+		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout,
+				     esmt_ecc_get_status)),
+	SPINAND_INFO("F50L1G41A",
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x21),
+		     NAND_MEMORG(1, 2048, 64, 64, 512, 20, 1, 1, 1),
+		     NAND_ECCREQ(1, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     0,
+		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout,
+				     esmt_ecc_get_status)),
 };
 
 static const struct spinand_manufacturer_ops esmt_spinand_manuf_ops = {
+};
+
+const struct spinand_manufacturer esmt_8c_spinand_manufacturer = {
+	.id = SPINAND_MFR_ESMT_8C,
+	.name = "ESMT_ELITE",
+	.chips = esmt_8c_spinand_table,
+	.nchips = ARRAY_SIZE(esmt_8c_spinand_table),
+	.ops = &esmt_spinand_manuf_ops,
 };
 
 const struct spinand_manufacturer esmt_c8_spinand_manufacturer = {
@@ -156,13 +225,5 @@ const struct spinand_manufacturer esmt_c8_spinand_manufacturer = {
 	.name = "ESMT",
 	.chips = esmt_c8_spinand_table,
 	.nchips = ARRAY_SIZE(esmt_c8_spinand_table),
-	.ops = &esmt_spinand_manuf_ops,
-};
-
-const struct spinand_manufacturer esmt_8c_spinand_manufacturer = {
-	.id = SPINAND_MFR_ESMT_8C,
-	.name = "ESMT",
-	.chips = esmt_8c_spinand_table,
-	.nchips = ARRAY_SIZE(esmt_8c_spinand_table),
 	.ops = &esmt_spinand_manuf_ops,
 };

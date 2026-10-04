@@ -120,18 +120,6 @@
 	};
 };
 
-&mmc0 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&mmc0_pins_default>;
-	bus-width = <8>;
-	max-frequency = <52000000>;
-	cap-mmc-highspeed;
-	cap-mmc-hw-reset;
-	vmmc-supply = <&reg_3p3v>;
-	non-removable;
-	status = "okay";
-};
-
 &uart0 {
 	status = "okay";
 };

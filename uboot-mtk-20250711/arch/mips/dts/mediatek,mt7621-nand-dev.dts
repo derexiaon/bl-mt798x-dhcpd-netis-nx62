@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: GPL-2.0
+
+/dts-v1/;
+
+#include "mt7621.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	compatible = "mediatek,mt7621-nand-dev", "mediatek,mt7621-soc";
+	model = "MT7621 NAND DEV";
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = &uart0;
+	};
+
+	config {
+		blink_led = "green:sys";
+		system_led = "green:sys2";
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		reset {
+			label = "reset";
+			gpios = <&gpio0 7 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+		};
+
+		wps {
+			label = "wps";
+			gpios = <&gpio0 6 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_WPS_BUTTON>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		sysled {
+			label = "green:sys";
+			gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+		};
+
+		sysled2 {
+			label = "green:sys2";
+			gpios = <&gpio0 15 GPIO_ACTIVE_LOW>;
+		};
+	};
+};
+
+&pinctrl {
+	state_default: pin_state {
+		nand {
+			groups = "spi", "sdxc";
+			function = "nand";
+		};
+
+		gpios {
+			groups = "i2c", "uart3", "pcie reset";
+			function = "gpio";
+		};
+
+		wdt {
+			groups = "wdt";
+			function = "wdt rst";
+		};
+
+		jtag {
+			groups = "jtag";
+			function = "jtag";
+		};
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&gpio {
+	status = "okay";
+};
+
+&eth {
+	status = "okay";
+};
+
+&ssusb {
+	status = "disabled";
+};
+
+&u3phy {
+	status = "disabled";
+};

@@ -3074,6 +3074,23 @@ config CMD_STACKPROTECTOR_TEST
 	  The stackprot_test command will force a stack overrun to test
 	  the stack smashing detection mechanisms.
 
+config CMD_GPIOTEST
+	bool "GPIO hardware verification tool"
+	depends on GPIO
+	help
+	  Enable gpiotest command for GPIO hardware verification.
+	  Provides sub-commands to scan all pins, blink LEDs, and monitor
+	  button inputs — useful for hardware bringup on boards that cannot
+	  run OpenWrt/Linux.
+
+	  Sub-commands:
+	    gpiotest list [bank]              - Scan GPIO states
+	    gpiotest blink <pin> [cnt] [ms]   - Blink a pin (LED test)
+	    gpiotest monitor <pin>            - Monitor input (button test)
+	    gpiotest all-leds [s] [e] [ms]    - Cycle pins one-by-one
+
+	  Also provides a gpioscan shortcut command.
+
 endmenu
 
 config CMD_UBI

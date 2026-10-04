@@ -891,9 +891,16 @@ static const struct spinand_manufacturer *spinand_manufacturers[] = {
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_ATO
 	&ato_spinand_manufacturer,
+	&ato_ad_spinand_manufacturer,
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_BIWIN
 	&biwin_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_CHUCUN
+	&chucun_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_DAMAY
+	&damay_spinand_manufacturer,
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_DOSILICON
 	&dosilicon_spinand_manufacturer,
@@ -904,6 +911,9 @@ static const struct spinand_manufacturer *spinand_manufacturers[] = {
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_ETRON
 	&etron_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_FISON
+	&fison_spinand_manufacturer,
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_FMSH
 	&fmsh_spinand_manufacturer,
@@ -923,14 +933,29 @@ static const struct spinand_manufacturer *spinand_manufacturers[] = {
 #ifdef CONFIG_MTD_SPI_NAND_HYF
 	&hyf_spinand_manufacturer,
 #endif
+#ifdef CONFIG_MTD_SPI_NAND_ICTHINK
+	&icthink_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_ISSI
+	&issi_spinand_manufacturer,
+#endif
 #ifdef CONFIG_MTD_SPI_NAND_JSC
 	&jsc_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_KINGSTON
+	&kingston_spinand_manufacturer,
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_MACRONIX
 	&macronix_spinand_manufacturer,
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_MICRON
 	&micron_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_MK
+	&mk_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_MIRA
+	&mira_spinand_manufacturer,
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_PARAGON
 	&paragon_spinand_manufacturer,
@@ -941,8 +966,17 @@ static const struct spinand_manufacturer *spinand_manufacturers[] = {
 #ifdef CONFIG_MTD_SPI_NAND_SKYHIGH
 	&skyhigh_spinand_manufacturer,
 #endif
+#ifdef CONFIG_MTD_SPI_NAND_TITAN
+	&titan_spinand_manufacturer,
+#endif
 #ifdef CONFIG_MTD_SPI_NAND_TOSHIBA
 	&toshiba_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_TYM
+	&tym_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_UNILC
+	&unilc_spinand_manufacturer,
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_UNIM
 	&unim_spinand_manufacturer,
@@ -951,14 +985,21 @@ static const struct spinand_manufacturer *spinand_manufacturers[] = {
 #ifdef CONFIG_MTD_SPI_NAND_WINBOND
 	&winbond_spinand_manufacturer,
 #endif
+#ifdef CONFIG_MTD_SPI_NAND_WODPOSIT
+	&wodposit_spinand_manufacturer,
+#endif
 #ifdef CONFIG_MTD_SPI_NAND_XINCUN
 	&xincun_spinand_manufacturer,
+	&xincun_6c_spinand_manufacturer,
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_XTX
 	&xtx_spinand_manufacturer,
 #endif
 #ifdef CONFIG_MTD_SPI_NAND_ZBIT
 	&zbit_spinand_manufacturer,
+#endif
+#ifdef CONFIG_MTD_SPI_NAND_ZENTEL
+	&zentel_spinand_manufacturer,
 #endif
 };
 
@@ -1274,6 +1315,7 @@ finish:
 
 	if (check_ret) {
 		dev_err(dev, "CASN page check failed\n");
+		dev_err(dev, "Your SPI NAND might not support CASN, or the CASN page is corrupted.\n");
 		return check_ret;
 	}
 

@@ -2,6 +2,8 @@
 /*
  * Copyright (c) 2023 Rockchip Electronics Co., Ltd
  *
+ * SPI NAND flash driver for GSTO (联和存储) devices.
+ *
  * Authors:
  *	Dingqiang Lin <jon.lin@rock-chips.com>
  */
@@ -118,6 +120,15 @@ static const struct spinand_info gsto_spinand_table[] = {
 		     SPINAND_ECCINFO(&gss0xgsax1_ooblayout, NULL)),
 	SPINAND_INFO("GSS01GSAX1",
 		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_DUMMY, 0xCA, 0x13),
+		     NAND_MEMORG(1, 2048, 128, 64, 1024, 20, 1, 1, 1),
+		     NAND_ECCREQ(8, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     0,
+		     SPINAND_ECCINFO(&gss0xgsax1_ooblayout, NULL)),
+	SPINAND_INFO("GSS01GSBX1",
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_DUMMY, 0xCB, 0x13),
 		     NAND_MEMORG(1, 2048, 128, 64, 1024, 20, 1, 1, 1),
 		     NAND_ECCREQ(8, 512),
 		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,

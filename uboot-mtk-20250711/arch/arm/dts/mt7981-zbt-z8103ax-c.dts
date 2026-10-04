@@ -8,7 +8,7 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 	model = "Zbtlink ZBT-Z8103AX-C";
-	compatible = "zbtlink,zbt-z8103ax-c", "mediatek,mt7981", "mediatek,mt7981-rfb";
+	compatible = "mediatek,mt7981", "mediatek,mt7981-rfb";
 
 	chosen {
 		stdout-path = &uart0;
@@ -34,6 +34,12 @@
 			// mtd layout for 64m ubi firmware
 			mtdids = "nmbm0=nmbm0";
 			mtdparts = "nmbm0:1024k(bl2),512k(u-boot-env),2048k(Factory),2048k(fip),65536k(ubi)";
+		};
+
+		layout@2 {
+			label = "asuswrt";
+			mtdids = "nmbm0=nmbm0";
+			mtdparts = "nmbm0:1024k(bl2),512k(u-boot-env),2048k(Factory),2048k(fip),125440k(ubi)";
 		};
 	};
 

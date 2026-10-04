@@ -13,7 +13,10 @@
 #ifndef __NET_MTK_DHCPD_H__
 #define __NET_MTK_DHCPD_H__
 
+#include <stdbool.h>
+
 int mtk_dhcpd_start(void);
 void mtk_dhcpd_stop(void);
+bool mtk_dhcpd_is_running(void);
 
 #endif /* __NET_MTK_DHCPD_H__ */

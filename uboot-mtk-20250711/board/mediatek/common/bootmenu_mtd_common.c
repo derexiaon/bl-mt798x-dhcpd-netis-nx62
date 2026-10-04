@@ -10,7 +10,7 @@
 #include <linux/string.h>
 
 #include "bootmenu_common.h"
-#include "colored_print.h"
+#include <failsafe/cprint.h>
 #include "mtd_helper.h"
 #include "bl2_helper.h"
 #include "fip_helper.h"
@@ -21,6 +21,9 @@
 
 static const char *alt_partname_factory(const char *partname)
 {
+	if (!IS_ENABLED(CONFIG_MTK_RF_PART_AUTO))
+		return NULL;
+
 	if (!partname)
 		return NULL;
 
@@ -259,7 +262,7 @@ int generic_ubi_write_fip(void *priv, const struct data_part_entry *dpe,
 int generic_ubi_write_factory(void *priv, const struct data_part_entry *dpe,
 			      const void *data, size_t size)
 {
-	return ubi_update_volume("factory", data, size);
+	return ubi_update_volume(get_rf_part_name(), data, size);
 }
 
 #ifdef CONFIG_MTK_DUAL_FIP
@@ -478,13 +481,13 @@ int generic_mtd_write_simg(void *priv, const struct data_part_entry *dpe,
 	uint32_t i;
 	int ret;
 
-#ifdef CONFIG_ENABLE_NAND_NMBM
-	mtd_nmbm = get_mtd_device_nm("nmbm0");
-	if (IS_ERR(mtd_nmbm))
-		mtd_nmbm = NULL;
-	else
-		put_mtd_device(mtd_nmbm);
-#endif
+	if (mtd_nmbm_enabled()) {
+		mtd_nmbm = get_mtd_device_nm("nmbm0");
+		if (IS_ERR(mtd_nmbm))
+			mtd_nmbm = NULL;
+		else
+			put_mtd_device(mtd_nmbm);
+	}
 
 	for (i = 0; i < 64; i++) {
 		mtd = get_mtd_device(NULL, i);
@@ -517,7 +520,7 @@ int generic_mtd_write_simg(void *priv, const struct data_part_entry *dpe,
 int generic_mtd_write_factory(void *priv, const struct data_part_entry *dpe,
 			      const void *data, size_t size)
 {
-	return write_mtd_part("factory", data, size, true);
+	return write_mtd_part(get_rf_part_name(), data, size, true);
 }
 
 int generic_mtd_validate_fw(void *priv, const struct data_part_entry *dpe,

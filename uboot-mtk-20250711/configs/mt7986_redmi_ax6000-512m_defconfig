@@ -50,7 +50,7 @@ CONFIG_CMD_PING=y
 CONFIG_CMD_SMC=y
 CONFIG_CMD_MTDPARTS=y
 CONFIG_MTDIDS_DEFAULT="nmbm0=nmbm0"
-CONFIG_MTDPARTS_DEFAULT="nmbm0:1024k(bl2),256k(Nvram),256k(Bdata),2048k(factory),2048k(fip),256k(crash),256k(crash_log),112640k(ubi)"
+CONFIG_MTDPARTS_DEFAULT="nmbm0:1024k(bl2),256k(Nvram),256k(Bdata),2048k(factory),2048k(fip),256k(crash),256k(crash_log),490m(ubi)"
 CONFIG_CMD_GL_BTN=y
 CONFIG_OF_EMBED=y
 CONFIG_ENV_OVERWRITE=y

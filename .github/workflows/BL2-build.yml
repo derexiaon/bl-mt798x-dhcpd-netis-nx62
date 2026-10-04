@@ -29,9 +29,9 @@ on:
         default: '2025'
         type: choice
         options:
-          - '2024'
           - '2025'
-          - '2026'
+          - 'SP1'
+          - 'SP2'
       ATF_OC:
         description: 'Include mt7981/mt7986 OC profiles'
         required: false
@@ -49,6 +49,9 @@ env:
   TZ: Asia/Shanghai
   UPLOAD_ARTIFACT: true
   UPLOAD_RELEASE: true
+  # Build configuration from inputs
+  CONFIG_ATF_VERSION: ${{ github.event.inputs.ATF_VERSION || '2025' }}
+  CONFIG_ATF_OC: ${{ github.event.inputs.ATF_OC || 'false' }}
 
 jobs:
   build-atf:
@@ -58,6 +61,26 @@ jobs:
       contents: write
 
     steps:
+      - name: Configuration check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ATF_VERSION_IN="$CONFIG_ATF_VERSION"
+
+          # Validate ATF_VERSION
+          case "$ATF_VERSION_IN" in
+            2025|SP1|SP2) ;;
+            *)
+              echo "Error: invalid ATF_VERSION: '$ATF_VERSION_IN' (expected 2025/SP1/SP2)" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "${{ github.event.inputs.pub_release }}" = "false" ]; then
+            echo "UPLOAD_RELEASE=false" >> $GITHUB_ENV
+          fi
+
       - name: Initialize build environment
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -67,10 +90,6 @@ jobs:
           sudo timedatectl set-timezone "$TZ"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
-
-          if [ "${{ github.event.inputs.pub_release }}" = "false" ]; then
-            echo "UPLOAD_RELEASE=false" >> $GITHUB_ENV
-          fi
 
       - name: Checkout source
         working-directory: /workdir
@@ -85,13 +104,46 @@ jobs:
           set -euo pipefail
           sudo -E apt-get -qq install $(cat bl-mt798x-dhcpd/depends/ubuntu-22.04)
 
+      - name: Generate .config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd bl-mt798x-dhcpd
+
+          # Generate .config for ATF build
+          echo "# CONFIG_BUILD_FIP is not set" > .config
+          echo "CONFIG_BUILD_ATF=y" >> .config
+          echo "# CONFIG_BUILD_GPT is not set" >> .config
+
+          # Version selection
+          echo "# CONFIG_VERSION_2025 is not set" >> .config
+          echo "# CONFIG_VERSION_SP1 is not set" >> .config
+          echo "# CONFIG_VERSION_SP2 is not set" >> .config
+          case "$CONFIG_ATF_VERSION" in
+            2025) echo "CONFIG_VERSION_2025=y" >> .config ;;
+            SP1) echo "CONFIG_VERSION_SP1=y" >> .config ;;
+            SP2) echo "CONFIG_VERSION_SP2=y" >> .config ;;
+          esac
+
+          # SILENT and BUILD_LOG defaults
+          echo "CONFIG_SILENT=y" >> .config
+          echo "CONFIG_BUILD_LOG=y" >> .config
+
+          # Run defconfig to fill in missing values
+          make defconfig 2>&1 || true
+
+          # Show final .config
+          echo "=== Generated .config ==="
+          cat .config
+          echo "========================="
+
       - name: Prepare ATF inputs
         shell: bash
         run: |
           set -euo pipefail
           cd bl-mt798x-dhcpd
 
-          if [ "${{ github.event.inputs.ATF_OC }}" = "true" ]; then
+          if [ "$CONFIG_ATF_OC" = "true" ]; then
             if [ -d "mt798x_atf/mt7981" ]; then
               echo "Enable mt7981 OC profile"
               shopt -s dotglob nullglob
@@ -115,11 +167,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${{ github.event.inputs.ATF_VERSION }}"
           cd bl-mt798x-dhcpd
           chmod +x ./build.sh
           chmod +x ./compile_atf.sh
-          VERSION=${version} ./compile_atf.sh
+          # Use make build target
+          make build 2>&1
           echo "FILE_DATE=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
 
@@ -169,8 +221,8 @@ jobs:
           echo "- Commit: ${{ github.sha }}" >> release.txt
           echo "- Source repo: ${{ env.REPO_URL }}" >> release.txt
           echo "- Branch: ${{ env.REPO_BRANCH }}" >> release.txt
-          echo "- ATF version: ${{ github.event.inputs.ATF_VERSION }}" >> release.txt
-          if [ "${{ github.event.inputs.ATF_OC }}" = "true" ]; then
+          echo "- ATF version: $CONFIG_ATF_VERSION" >> release.txt
+          if [ "$CONFIG_ATF_OC" = "true" ]; then
             echo "- OC profile: Enabled" >> release.txt
           else
             echo "- OC profile: Disabled" >> release.txt

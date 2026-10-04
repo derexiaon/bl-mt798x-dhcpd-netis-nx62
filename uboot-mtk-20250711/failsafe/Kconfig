@@ -2,23 +2,27 @@
 # Failsafe Web UI
 #
 
-config WEBUI_FAILSAFE
+menuconfig WEBUI_FAILSAFE
 	bool "Enable Failsafe Web UI"
 	select MTK_TCP
 	select MTK_HTTPD
+	select MTK_DHCPD
+	select MTK_DNSD
+	select MTK_NET_ABORT
 	default n
 	help
 	  Enable Web based failsafe UI
 
+if WEBUI_FAILSAFE
+
 choice
 	prompt "Failsafe Web UI style"
-	default WEBUI_FAILSAFE_UI_NEW
-	depends on WEBUI_FAILSAFE
+	default WEBUI_FAILSAFE_UI_BOOTSTRAP
 	help
 	  Select which UI resources to embed for failsafe Web UI.
 
-config WEBUI_FAILSAFE_UI_NEW
-	bool "New UI (fsdata)"
+config WEBUI_FAILSAFE_UI_BOOTSTRAP
+	bool "Bootstrap UI (fsdata)"
 
 config WEBUI_FAILSAFE_UI_MTK
 	bool "MTK UI (fsdata_mtk)"
@@ -28,13 +32,30 @@ config WEBUI_FAILSAFE_UI_GL
 
 endchoice
 
+config WEBUI_FAILSAFE_BUILD_VARIANT
+	string "Failsafe build variant tag"
+	default ""
+	depends on WEBUI_FAILSAFE
+	help
+	  Optional build variant string shown in failsafe sysinfo.
+
 config WEBUI_FAILSAFE_I18N
-	bool "Enable i18n dictionary (fsdata)"
+	bool "Enable I18N dictionary (fsdata)"
 	default y
-	depends on WEBUI_FAILSAFE_UI_NEW
+	depends on WEBUI_FAILSAFE_UI_BOOTSTRAP
 	help
 	  Enable i18n dictionary resources for the new failsafe Web UI.
 	  When disabled, i18n.js will not be embedded or served.
+
+config WEBUI_FAILSAFE_GPT
+	bool "Enable GPT partition table update"
+	default y if MTK_BOOTMENU_MMC
+	depends on MTK_BOOTMENU_MMC
+	help
+	  Enable GPT partition table update in the failsafe Web UI.
+	  This allows update of the GPT partition table from a file upload.
+
+	  WARNING: This is a dangerous feature and may brick the device.
 
 config WEBUI_FAILSAFE_ADVANCED
 	bool "Enable advanced features"
@@ -43,38 +64,16 @@ config WEBUI_FAILSAFE_ADVANCED
 	help
 	  Enable advanced features in the failsafe Web UI.
 
-config WEBUI_FAILSAFE_BUILD_VARIANT
-	string "Failsafe build variant tag"
-	default ""
-	depends on WEBUI_FAILSAFE
-	help
-	  Optional build variant string shown in failsafe sysinfo.
-
-config WEBUI_FAILSAFE_FACTORY
-	bool "Enable Factory upgrade (DANGEROUS)"
-	default y
-	depends on WEBUI_FAILSAFE_ADVANCED
-	help
-	  Enable Factory partition upgrade in the failsafe Web UI.
-	  This is an advanced feature and should be used with care.
-
-config WEBUI_FAILSAFE_SIMG
-	bool "Enable Single Image upgrade (DANGEROUS)"
-	default n
-	depends on WEBUI_FAILSAFE_ADVANCED
-	help
-	  Enable Single Image (ROM dump) upgrade in the failsafe Web UI.
-	  This is a very dangerous feature and may brick the device.
+if WEBUI_FAILSAFE_ADVANCED
 
 config WEBUI_FAILSAFE_BACKUP
 	bool "Enable backup download"
 	default y
-	depends on WEBUI_FAILSAFE_ADVANCED
 	help
 	  Enable backup download functionality in the failsafe Web UI.
 
 config WEBUI_FAILSAFE_FLASH
-	bool "Enable flash editor (DANGEROUS)"
+	bool "Enable flash editor"
 	default y
 	depends on WEBUI_FAILSAFE_BACKUP
 	help
@@ -83,18 +82,22 @@ config WEBUI_FAILSAFE_FLASH
 
 	  WARNING: This is a dangerous feature and may brick the device.
 
-config WEBUI_FAILSAFE_ENV
-	bool "Enable U-Boot environment management (DANGEROUS)"
-	default y
-	depends on WEBUI_FAILSAFE_ADVANCED
+config WEBUI_FAILSAFE_NAND_RAW
+	bool "Enable NAND raw/OOB backup and flash"
+	default n
+	depends on MTD && WEBUI_FAILSAFE_FLASH
 	help
-	  Enable environment variable management (list/add/delete/reset/restore)
-	  in the failsafe Web UI.
+	  Enable NAND raw mode in backup and flash editor that reads/writes
+	  pages including OOB (Out-Of-Band) spare area data via MTD_OPS_RAW.
+
+	  This preserves ECC layout and is required for byte-exact NAND dumps.
+
+	  WARNING: Raw mode requires significantly more memory (page_size +
+	  oob_size per page) and is only available on NAND flash devices.
 
 config WEBUI_FAILSAFE_CONSOLE
-	bool "Enable failsafe Web console (DANGEROUS)"
+	bool "Enable Web console"
 	select CONSOLE_RECORD
-	depends on WEBUI_FAILSAFE_ADVANCED
 	default y
 	help
 	  Enable a simple web console (web terminal) in the failsafe Web UI.
@@ -105,3 +108,67 @@ config WEBUI_FAILSAFE_CONSOLE
 
 	  Optional hardening:
 	  - Set env var 'failsafe_console_token' to require a token in requests.
+
+config WEBUI_FAILSAFE_ENV
+	bool "Enable U-Boot environment management"
+	default y
+	help
+	  Enable environment variable management (list/add/delete/reset/restore)
+	  in the failsafe Web UI.
+
+config WEBUI_FAILSAFE_ENV_CUSTOM_ENV
+	bool "Load custom env once on first access"
+	default n
+	depends on WEBUI_FAILSAFE_ENV
+	help
+	  When enabled, the failsafe environment manager will append the
+	  variables from defenvs/custom_env into the live environment once,
+	  then persist the result. Existing variables are preserved and a
+	  marker variable prevents repeated application.
+
+config WEBUI_FAILSAFE_ENV_CUSTOM_ENV_FILE
+	string "Custom env file path"
+	default "defenvs/custom_env"
+	depends on WEBUI_FAILSAFE_ENV_CUSTOM_ENV
+	help
+	  Path to the environment text file to use when applying the one-time
+	  custom environment. The file path is interpreted relative to the
+	  U-Boot source tree. The default is "defenvs/custom_env". When this
+	  option is changed, the generated header used by the build system will
+	  be regenerated from the selected file.
+
+config WEBUI_FAILSAFE_ENV_DEFAULT_GLBTN_KEY
+	bool "Auto-create default glbtn_key when missing"
+	default y
+	depends on WEBUI_FAILSAFE_ENV && CMD_GL_BTN
+	help
+	  When enabled, failsafe environment API will automatically create
+	  and persist glbtn_key=reset,wps,mesh if glbtn_key does not exist.
+	  Existing glbtn_key values are never overwritten.
+
+config WEBUI_FAILSAFE_FACTORY
+	bool "Enable RF-EEPROM upgrade"
+	default y
+	help
+	  Enable Factory partition upgrade in the failsafe Web UI.
+	  This is an advanced feature and should be used with care.
+
+config WEBUI_FAILSAFE_SIMG
+	bool "Enable Single Image upgrade"
+	default n
+	help
+	  Enable Single Image (ROM dump) upgrade in the failsafe Web UI.
+	  This is a very dangerous feature and may brick the device.
+
+config WEBUI_FAILSAFE_UBI
+	bool "Enable UBI volume management"
+	default n
+	depends on MTD && !MTK_BOOTMENU_MMC
+	select CMD_UBI
+	help
+	  Enable UBI volume management in the failsafe Web UI.
+	  This allows managing UBI volumes on NAND flash devices.
+
+endif # WEBUI_FAILSAFE_ADVANCED
+
+endif # WEBUI_FAILSAFE

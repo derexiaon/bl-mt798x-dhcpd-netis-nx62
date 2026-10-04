@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: GPL-2.0
+
+/dts-v1/;
+
+#include "mt7621.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	compatible = "mediatek,mt7621-nor-dev", "mediatek,mt7621-soc";
+	model = "MT7621 NOR DEV";
+
+	aliases {
+		serial0 = &uart0;
+		spi0 = &spi;
+	};
+
+	chosen {
+		stdout-path = &uart0;
+	};
+
+	config {
+		blink_led = "red:sys";
+        system_led = "blue:sys2";
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		reset {
+			label = "reset";
+			gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		sysled {
+			label = "red:sys";
+			gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+		};
+
+		sysled2 {
+			label = "yellow:sys2";
+			gpios = <&gpio0 14 GPIO_ACTIVE_LOW>;
+		};
+
+		sysled3 {
+			label = "blue:sys3";
+			gpios = <&gpio0 15 GPIO_ACTIVE_LOW>;
+		};
+	};
+};
+
+&pinctrl {
+	state_default: pin_state {
+		gpios {
+			groups = "i2c", "uart3", "pcie reset";
+			function = "gpio";
+		};
+
+		wdt {
+			groups = "wdt";
+			function = "wdt rst";
+		};
+
+		jtag {
+			groups = "jtag";
+			function = "jtag";
+		};
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&gpio {
+	status = "okay";
+};
+
+&spi {
+	status = "okay";
+	num-cs = <2>;
+
+	spi-flash@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "jedec,spi-nor";
+		spi-max-frequency = <25000000>;
+		reg = <0>;
+	};
+};
+
+&eth {
+	status = "okay";
+};
+
+&mmc {
+	cap-sd-highspeed;
+
+	status = "disabled";
+};
+
+&ssusb {
+	status = "disabled";
+};
+
+&u3phy {
+	status = "disabled";
+};

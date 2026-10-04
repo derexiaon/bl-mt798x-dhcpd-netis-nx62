@@ -12,30 +12,6 @@
 		system_led = "blue:power";
 	};
 
-	mtd-layout {
-		layout@0 {
-			label = "default";
-			cmdline = "console=ttyS0,115200n1 loglevel=8 firmware=0 uart_en=1";
-			mtdids = "nmbm0=nmbm0";
-			mtdparts = "nmbm0:1024k(bl2),512k(u-boot-env),2048k(factory),2048k(fip),-(ubi)";
-			boot_part = "ubi";
-			factory_part = "factory";
-			sysupgrade_kernel_ubipart = "fit";
-			sysupgrade_rootfs_ubipart = "rootfs_data";
-		};
-
-		layout@1 {
-			label = "ubootmod";
-			cmdline = "console=ttyS0,115200n1 loglevel=8 firmware=0 uart_en=1";
-			mtdids = "nmbm0=nmbm0";
-			mtdparts = "nmbm0:1024k(bl2),512k(u-boot-env),2048k(factory),2048k(fip),-(ubi)";
-			boot_part = "ubi";
-			factory_part = "factory";
-			sysupgrade_kernel_ubipart = "fit";
-			sysupgrade_rootfs_ubipart = "rootfs_data";
-		};
-	};
-
 	gpio-leds {
 		compatible = "gpio-leds";
 
