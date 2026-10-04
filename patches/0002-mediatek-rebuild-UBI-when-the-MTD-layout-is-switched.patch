@@ -1,0 +1,135 @@
+From 0275a03777ba11ddcf2560dfd9e4dfc5f25ab1c8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 4 Oct 2026 20:23:18 +0000
+Subject: [PATCH] mediatek: rebuild UBI when the MTD layout is switched in
+ failsafe
+
+If UBI is still attached to the partition of the old layout (e.g. after
+a failed boot attempt), mtd_probe_devices() can't delete the partitions
+in use, so the new mtdparts are not applied and ubi_part() keeps using
+the stale attachment: the firmware ends up in the old partition.
+
+Detach UBI when the failsafe switches the layout and erase every UBI
+partition mounted for writing during that upgrade, so nothing of the
+previous layout (UBI with another size, NMBM blocks, stale volumes)
+survives.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01AYm4drLdo4LK2sWwMMdxGB
+---
+ .../board/mediatek/common/mtd_helper.c        | 50 +++++++++++++++++++
+ .../board/mediatek/common/mtd_helper.h        |  8 +++
+ uboot-mtk-20250711/failsafe/modules/upgrade.c |  6 +++
+ 3 files changed, 64 insertions(+)
+
+diff --git a/uboot-mtk-20250711/board/mediatek/common/mtd_helper.c b/uboot-mtk-20250711/board/mediatek/common/mtd_helper.c
+index be08bb89..8fb62592 100644
+--- a/uboot-mtk-20250711/board/mediatek/common/mtd_helper.c
++++ b/uboot-mtk-20250711/board/mediatek/common/mtd_helper.c
+@@ -716,10 +716,60 @@ static int write_ubi1_image(const void *data, size_t size,
+ 				  ii->ubi_size + ii->marker_size, true);
+ }
+ 
++#ifdef CONFIG_MEDIATEK_MULTI_MTD_LAYOUT
++/*
++ * Set while an upgrade is written right after the MTD layout was switched.
++ * Every UBI partition mounted for writing during that upgrade is erased
++ * first, so nothing of the previous layout (UBI PEBs written with another
++ * partition size, NMBM management blocks, stale kernel/rootfs volumes)
++ * survives in the new partition.
++ */
++static bool ubi_layout_rebuild;
++static char ubi_layout_rebuilt_part[32];
++
++void mtd_layout_switch_begin(void)
++{
++	/*
++	 * UBI may still be attached to a partition of the old layout (e.g.
++	 * after a failed boot attempt). An attached partition can't be
++	 * deleted, so the new mtdparts would not be applied and ubi_part()
++	 * would reuse the stale attachment. Detach it first.
++	 */
++	ubi_detach();
++
++	ubi_layout_rebuild = true;
++	ubi_layout_rebuilt_part[0] = '\0';
++}
++
++void mtd_layout_switch_end(void)
++{
++	ubi_layout_rebuild = false;
++	ubi_layout_rebuilt_part[0] = '\0';
++}
++#endif
++
+ static int mount_ubi(struct mtd_info *mtd, bool create)
+ {
+ 	int ret;
+ 
++#ifdef CONFIG_MEDIATEK_MULTI_MTD_LAYOUT
++	if (create && ubi_layout_rebuild &&
++	    strcmp(ubi_layout_rebuilt_part, mtd->name)) {
++		cprintln(NORMAL, "*** MTD layout changed, rebuilding UBI on '%s' ***",
++			 mtd->name);
++
++		ubi_detach();
++
++		ret = mtd_erase_skip_bad(mtd, 0, mtd->size, mtd->size,
++					 NULL, NULL, NULL, false);
++		if (ret)
++			return ret;
++
++		strlcpy(ubi_layout_rebuilt_part, mtd->name,
++			sizeof(ubi_layout_rebuilt_part));
++	}
++#endif
++
+ 	ret = ubi_part(mtd->name, NULL);
+ 	if (ret) {
+ 		if (create) {
+diff --git a/uboot-mtk-20250711/board/mediatek/common/mtd_helper.h b/uboot-mtk-20250711/board/mediatek/common/mtd_helper.h
+index c91221fa..8d06dba9 100644
+--- a/uboot-mtk-20250711/board/mediatek/common/mtd_helper.h
++++ b/uboot-mtk-20250711/board/mediatek/common/mtd_helper.h
+@@ -38,6 +38,14 @@ void gen_mtd_probe_devices(void);
+ bool mtd_nmbm_enabled(void);
+ 
+ int ubi_mount_default(void);
++
++#if defined(CONFIG_CMD_UBI) && defined(CONFIG_MEDIATEK_MULTI_MTD_LAYOUT)
++void mtd_layout_switch_begin(void);
++void mtd_layout_switch_end(void);
++#else
++static inline void mtd_layout_switch_begin(void) {}
++static inline void mtd_layout_switch_end(void) {}
++#endif
+ int update_ubi_volume_raw(struct ubi_volume *vol, const char *volume,
+ 			  int vol_id, const void *data, size_t size,
+ 			  uint64_t reserved_size, bool dynamic);
+diff --git a/uboot-mtk-20250711/failsafe/modules/upgrade.c b/uboot-mtk-20250711/failsafe/modules/upgrade.c
+index fe81ddab..e9eff567 100644
+--- a/uboot-mtk-20250711/failsafe/modules/upgrade.c
++++ b/uboot-mtk-20250711/failsafe/modules/upgrade.c
+@@ -123,6 +123,9 @@ static void failsafe_prepare_mtd_layout(void)
+ 	if (!cur_layout || strcmp(cur_layout, mtd_layout_label) ||
+ 	    !env_layout || strcmp(env_layout, mtd_layout_label)) {
+ 		printf("httpd: switching mtd layout: %s\n", mtd_layout_label);
++#ifdef CONFIG_MTD
++		mtd_layout_switch_begin();
++#endif
+ 		env_set("mtd_layout", mtd_layout_label);
+ 		env_set("mtd_layout_label", mtd_layout_label);
+ 	}
+@@ -428,6 +431,9 @@ void result_handler(enum httpd_uri_handler_status status,
+ 				st->ret = failsafe_write_image(upload_data,
+ 							       upload_size, fw_type);
+ #ifdef CONFIG_MEDIATEK_MULTI_MTD_LAYOUT
++#ifdef CONFIG_MTD
++			mtd_layout_switch_end();
++#endif
+ 			if (st->ret)
+ 				mtd_layout_save_pending = false;
+ #endif
+-- 
+2.43.0
+

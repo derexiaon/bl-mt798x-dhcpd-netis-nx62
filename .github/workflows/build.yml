@@ -1,0 +1,148 @@
+name: Build Netis NX62 bootloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'ATF version (SP2 = ATF 2026.01.23, 2025 = ATF 2025.07.11)'
+        required: true
+        default: 'SP2 + 2025'
+        type: choice
+        options:
+          - 'SP2 + 2025'
+          - 'SP2'
+          - '2025'
+      upstream_ref:
+        description: 'Upstream bl-mt798x-dhcpd commit/branch (empty = pinned in build.sh, "master" = latest)'
+        required: false
+        default: ''
+        type: string
+      release:
+        description: 'Publish a GitHub Release with the images'
+        required: false
+        default: false
+        type: boolean
+  push:
+  # Weekly trial build against the latest upstream, to notice breakage early
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: netis-nx62-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      upstream_ref: ${{ steps.set.outputs.upstream_ref }}
+    steps:
+      - id: set
+        run: |
+          case "${{ github.event.inputs.versions || 'SP2 + 2025' }}" in
+            'SP2') echo 'matrix=["SP2"]' >> "$GITHUB_OUTPUT" ;;
+            '2025') echo 'matrix=["2025"]' >> "$GITHUB_OUTPUT" ;;
+            *) echo 'matrix=["SP2","2025"]' >> "$GITHUB_OUTPUT" ;;
+          esac
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo 'upstream_ref=master' >> "$GITHUB_OUTPUT"
+          else
+            echo 'upstream_ref=${{ github.event.inputs.upstream_ref }}' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node.js (failsafe web UI minifier)
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y \
+            build-essential bc bison flex \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            device-tree-compiler libssl-dev libgnutls28-dev
+
+      - name: Build and verify (${{ matrix.version }})
+        env:
+          VERSION: ${{ matrix.version }}
+          UPSTREAM_REF: ${{ needs.prepare.outputs.upstream_ref }}
+        run: |
+          [ -n "$UPSTREAM_REF" ] || unset UPSTREAM_REF
+          ./build.sh 2>&1 | tee build.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Collect files
+        if: always()
+        run: |
+          mkdir -p output
+          cp README.md output/README-netis-nx62.md
+          gzip -9c build.log > output/build-${{ matrix.version }}.log.gz || true
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: netis_nx62-bootloader-${{ matrix.version }}
+          path: output/*
+          retention-days: 90
+
+  release:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Prepare release
+        id: meta
+        run: |
+          cd dist
+          sha256sum *.img *.bin > SHA256SUMS
+          echo "tag=netis-nx62-$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+          echo "upstream=$(cat upstream-commit.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Netis NX62 bootloader ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Netis NX62 / Netcore N60 Pro: BL2 + FIP, multi-layout, без NMBM, DHCP + веб-интерфейс восстановления.
+            Разметки: `default` (сток, ubi 117248k) и `openwrt` (официальный OpenWrt netcore_n60-pro, ubi 125440k).
+            Upstream bl-mt798x-dhcpd: ${{ steps.meta.outputs.upstream }}
+            Перед прошивкой прочитайте README-netis-nx62.md.
+          files: |
+            dist/*.img
+            dist/*.bin
+            dist/SHA256SUMS
+            dist/README-netis-nx62.md

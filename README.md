@@ -1,435 +1,239 @@
-# ATF and u-boot for mt798x with DHCPD
+# Netis NX62 / Netcore N60 Pro: загрузчик с multi-layout
 
-A modified version of hanwckf's U-Boot for MT798x by Yuzhii, with support for DHCPD and a beautiful web UI. (Builds available for versions 2025/SP1/SP2)
+BL2 + FIP (BL31 + U-Boot с DHCP-сервером и веб-интерфейсом восстановления) для
+**Netis NX62** (аппаратный двойник **Netcore N60 Pro**): MT7986A, DDR4
+512 МБ / 1 ГБ / 2 ГБ, SPI-NAND 128 МБ (страница 2 КБ, блок 128 КБ).
 
-Supports GitHub Actions for automatic builds, and can generate both normal and overclocked BL2.
+В веб-интерфейсе устройство называется **Netis NX62**. Загрузчик умеет две
+разметки флешки и переключается между ними прямо при прошивке:
 
-> [!CAUTION]
-> **Warning: Flashing custom bootloaders can brick your device. Proceed with caution and at your own risk.**
-
-> **Netis NX62 / Netcore N60 Pro:** multi-layout bootloader (stock + official OpenWrt, no NMBM) — see [document/netis-nx62.md](document/netis-nx62.md) and the `Build Netis NX62 bootloader` GitHub Actions workflow.
-
-## About bl-mt798x
-
-> [!NOTE]
-> How to use it? Click [**here**](#the-best-practices) for usage instructions.
-
-U-Boot 2025 adds more features:
-
-- System info display
-- Factory (RF) update
-- Backup download
-- Flash editor
-- Web terminal
-- Environment manager
-- Theme manager
-- I18N support
-- Device reboot
-- UBI volume management
-
-![Version-2025](document/pictures/uboot-2025.png)
-
-You can configure the features you need.
-
-- [x] MTK_DHCPD
-  - [x] MTK_DHCPD_USE_CONFIG_IP
-  - MTK_DHCPD_POOL_START_HOST default 100
-  - MTK_DHCPD_POOL_SIZE default 101
-- [ ] MTK_TELNETD
-- Failsafe Web UI style:
-  - [x] WEBUI_FAILSAFE_UI_BOOTSTRAP
-    - [x] WEBUI_FAILSAFE_I18N
-  - [ ] WEBUI_FAILSAFE_UI_GL
-  - [ ] WEBUI_FAILSAFE_UI_MTK
-- [x] WEBUI_FAILSAFE_ADVANCED - Enable advanced features
-  - [ ] WEBUI_FAILSAFE_SIMG - Enable Single Image upgrade
-  - [x] WEBUI_FAILSAFE_FACTORY - Enable factory (RF) update
-  - [x] WEBUI_FAILSAFE_BACKUP - Enable backup download
-  - [x] WEBUI_FAILSAFE_ENV - Enable environment manager
-  - [x] WEBUI_FAILSAFE_CONSOLE - Enable web terminal
-  - [x] WEBUI_FAILSAFE_FLASH - Enable flash editor
-  - [x] WEBUI_FAILSAFE_UBI - Enable UBI volume management
-
-## Prepare
-
-```bash
-sudo apt install gcc-aarch64-linux-gnu build-essential flex bison libssl-dev device-tree-compiler qemu-user-static nodejs npm
-```
-
-> If you want to build for armv7l devices, you also need to install `gcc-arm-linux-gnueabi`
->
-> The failsafe web UI assets are minified at build time. If you build U-Boot manually, run `npm install` once in `uboot-mtk-20250711/failsafe/embedded` so the local minifier dependency is available. It will be installed automatically by the `build.sh` tool.
-
-## Build
-
-Configure once with:
-
-```bash
-make menuconfig
-```
-
-Then build the current `.config` selection:
-
-```bash
-make
-```
-
-In `make menuconfig`, you can control whether `make` runs FIP (`build.sh`), ATF (`compile_atf.sh`), and GPT (`generate_gpt.sh`) with:
-
-- `BUILD_FIP`
-- `BUILD_ATF`
-- `BUILD_GPT`
-
-Build every board with the selected version by using:
-
-```bash
-make all
-```
-
-For help:
-
-```bash
-make help
-```
-
-Single model examples:
-
-```bash
-# mt7981, emmc device
-make BOARD=sn_r1
-# mt7981, spi-nand device, nonmbm device, multi-layout support
-make BOARD=zbt_z8103ax-c VARIANT=NONMBM
-# mt7986, spi-nand device, multi-layout support, single image upgrade support
-make BOARD=ruijie_rg-x60-new VERSION=SP1 SIMG=1
-```
-
-List available boards for a version:
-
-```bash
-make boards VERSION=2025
-```
-
-- Version (default: 2025. Optional, for different versions of ATF and U-Boot)
-
-| Version | ATF | UBOOT |
+| Разметка (`mtd_layout`) | Для какой прошивки | Раздел `ubi` |
 | --- | --- | --- |
-| 2025 | 20250711 | 20250711 |
-| SP1 | 20241017-bacca82a8 | 20250711 |
-| SP2 | 20260123 | 20250711 |
+| `default` | стоковая прошивка Netis/Netcore; сборки на стоковой разметке с NMBM (Kwrt, ImmortalWrt mt798x и т.п.) | `117248k` (0x580000–0x7800000) |
+| `openwrt` | официальный OpenWrt 24.10 / 25.12 и ImmortalWrt 24.10+, устройство `netcore_n60-pro` | `125440k` (0x580000–0x8000000) |
 
-> SP1: For some devices, still use the kernel 5.4 firmware, may cause some issues on version 2025, like hwrng wrong, in this case, you can try SP1.
->
-> SP2: With some modifications for better compatibility with new platforms, like mt7987, or newest kernel.
+Начало флешки одинаково для обеих разметок:
+`1024k(bl2),512k(u-boot-env),2048k(factory),2048k(fip)`.
 
-- VARIANT (default: default. Optional, for different firmware variants)
+## Почему прошлые сборки работали нестабильно
 
-> Normally, `VARIANT` is prepared for MTD devices.
+1. **NMBM.** Стоковая прошивка работает через NMBM: в последних 8 МБ флешки
+   лежат служебные таблицы NMBM. Официальный OpenWrt NMBM не использует и
+   занимает флешку до конца. Загрузчик с NMBM (вариант `default` этого
+   репозитория, а также стоковый BL2) **при каждой загрузке** ищет и, если не
+   находит, заново записывает таблицы NMBM в конец флешки — прямо поверх
+   блоков UBI официального OpenWrt. Отсюда «плавающие» ошибки UBI.
+   Эта сборка (вариант `nonmbm`) работает с NAND напрямую, как официальный
+   загрузчик OpenWrt: BL2 пропускает bad-блоки (`_NAND_SKIP_BAD`), U-Boot
+   использует `spi-nand0`. Разметка `default` не касается области NMBM, так
+   что стоковое ядро продолжает работать со своими таблицами.
+2. **Неверная разметка в DTS.** В прошлой попытке `factory_part = "factory"`:
+   это раздел, *куда веб-интерфейс пишет прошивку*, то есть прошивка
+   записалась бы в раздел калибровки Wi-Fi. Кроме того, раздел `ubi` был
+   `-(ubi)` поверх NMBM, а `sysupgrade_rootfs_ubipart` указывал на
+   несуществующий раздел `rootfs_data`.
+3. **Смена разметки при подключённом UBI.** Если UBI уже был подключён
+   (например, после неудачной попытки загрузки), U-Boot не мог пересоздать
+   разделы новой разметки и писал прошивку в старый раздел `ubi`. Теперь при
+   смене разметки UBI отключается, а раздел `ubi` новой разметки стирается
+   перед записью — от старой разметки ничего не остаётся.
+4. **TRNG.** ATF 2025/2026 по умолчанию закрывает аппаратный генератор
+   случайных чисел для Linux (доступ только через SMC). Стоковое ядро 5.4
+   читает регистры TRNG напрямую и получает ошибки hwrng. Для NX62 включена
+   опция `_MT7986_TRNG_NS_ACCESS`: работает и прямой доступ (сток), и SMC
+   (OpenWrt).
+5. **Старый исходный код.** Форк отставал от upstream на 482 коммита. Теперь
+   исходники берутся прямо из актуального upstream
+   [Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd)
+   (новые драйверы SPI-NAND, исправления failsafe и TCP-стека). Прежнее
+   полное дерево исходников сохранено в ветке `old-full-tree`.
 
-| Variant | Description | Adapted Firmware |
+## Как устроен репозиторий
+
+Здесь лежат только файлы, относящиеся к NX62. Исходники U-Boot и ATF
+скачиваются из upstream
+[Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd)
+во время сборки.
+
+| Файл | Что это |
+| --- | --- |
+| `build.sh` | скачивает upstream, добавляет файлы NX62, накладывает патчи, собирает и проверяет |
+| `board/mt7986a-netis-nx62.dts` | описание платы: модель «Netis NX62», разметки `default` и `openwrt`, светодиоды |
+| `board/mt7986_netis_nx62_defconfig` | конфигурация U-Boot (одна разметка) |
+| `board/mt7986_netis_nx62_multi_layout_defconfig` | конфигурация U-Boot (multi-layout, используется) |
+| `board/atf_mt7986_netis_nx62_defconfig` | конфигурация BL2/BL31: DDR4, SPI-NAND без NMBM, TRNG для стока |
+| `patches/0001-…TRNG…patch` | ATF: опция доступа стокового ядра к TRNG |
+| `patches/0002-…UBI…patch` | U-Boot: чистое пересоздание UBI при смене разметки |
+| `.github/workflows/build.yml` | сборка в GitHub Actions |
+
+## Сборка в GitHub Actions
+
+1. **Actions → Build Netis NX62 bootloader → Run workflow.**
+2. Версия ATF:
+   - `SP2` — ATF 2026.01.23, **рекомендуется** (самая новая);
+   - `2025` — ATF 2025.07.11, запасной вариант;
+   - `SP2 + 2025` — собрать обе.
+3. `upstream_ref` — оставьте пустым (проверенный коммит upstream) или
+   укажите `master`, чтобы собрать на самой свежей версии.
+4. Галочка *Publish a GitHub Release* дополнительно создаёт релиз с файлами.
+5. Результат — артефакт `netis_nx62-bootloader-<версия>`:
+   - `netis_nx62-<версия>-bl2.img` — BL2 (раздел `bl2`);
+   - `netis_nx62-<версия>-fip.bin` — BL31 + U-Boot (раздел `fip`);
+   - `SHA256SUMS`, `upstream-commit.txt`, этот файл и лог сборки.
+
+Сборка сама проверяет результат: BL2 и U-Boot без NMBM, обе разметки на
+месте, модель `Netis NX62`, размеры образов, нет записи прошивки в чужой
+раздел. Если что-то не так — сборка падает, а не выпускает образ.
+
+Локально (Ubuntu 24.04):
+
+```sh
+sudo apt install build-essential bc bison flex gcc-aarch64-linux-gnu \
+    device-tree-compiler libssl-dev libgnutls28-dev nodejs npm python3 git
+./build.sh                    # SP2, проверенный upstream
+VERSION=2025 ./build.sh       # ATF 2025
+UPSTREAM_REF=master ./build.sh
+```
+
+## Обновление upstream
+
+- Каждый понедельник workflow сам пробует собрать NX62 на свежем `master`
+  upstream. Если упало — значит, upstream поменял что-то, что нужно
+  поправить в патчах или файлах платы.
+- Чтобы перейти на новую версию: запустите сборку с `upstream_ref = master`,
+  проверьте загрузчик и впишите коммит из `upstream-commit.txt` в
+  `UPSTREAM_PINNED` в `build.sh`.
+- Конфликтов слияния с upstream нет: в репозитории только свои файлы.
+
+## Перед прошивкой
+
+> **Внимание.** Замена BL2 — операция с риском «кирпича». Восстановление
+> после неудачи возможно только через UART и mtk_uartboot. Всё делаете на
+> свой риск. Сборка проверена компиляцией и статически, на живом роутере —
+> нет.
+
+- Нужно прошить **оба** файла: и BL2, и FIP. Стоковый BL2 (и BL2 варианта
+  `default`) использует NMBM и будет портить UBI официального OpenWrt.
+- Сохраните разделы `bl2`, `u-boot-env`, `factory`, `fip` (а лучше — всю
+  флешку). `factory` — калибровка Wi-Fi и MAC-адреса, она уникальна для
+  каждого роутера.
+- Если сейчас стоит стоковая прошивка или сборка с NMBM, убедитесь, что NMBM
+  не переназначал блоки (в `dmesg` нет сообщений NMBM о bad/remapped
+  блоках). Если переназначенные блоки есть, данные лежат не по тем адресам,
+  которые видит загрузчик без NMBM, — не прошивайте.
+- Версия с NAND 512 МБ (китайская) этой сборкой не поддерживается.
+
+## Прошивка загрузчика
+
+### Из OpenWrt (официальный или сборка на стоковой разметке)
+
+Скопируйте файлы на роутер в `/tmp` и проверьте имена разделов в
+`cat /proc/mtd` (`bl2`, `fip`; в некоторых сборках — `BL2`, `FIP`).
+Разделы загрузчика в OpenWrt защищены от записи, нужен модуль `mtd-rw`:
+
+```sh
+apk update && apk add kmod-mtd-rw        # OpenWrt 25.12
+# opkg update && opkg install kmod-mtd-rw # OpenWrt 24.10 и старше
+insmod mtd-rw i_want_a_brick=1
+
+cd /tmp
+sha256sum netis_nx62-SP2-*            # сверить с SHA256SUMS
+mtd write netis_nx62-SP2-fip.bin fip && mtd verify netis_nx62-SP2-fip.bin fip
+mtd write netis_nx62-SP2-bl2.img bl2 && mtd verify netis_nx62-SP2-bl2.img bl2
+```
+
+Не перезагружайте роутер, если `mtd verify` сообщил об ошибке, — повторите
+запись.
+
+### Если уже стоит U-Boot из этого репозитория
+
+В веб-интерфейсе восстановления: страница **U-Boot update** — файл `fip.bin`,
+страница **BL2 update** — файл `bl2.img`.
+
+### Со стоковой прошивки
+
+Напрямую нельзя: сначала поставьте OpenWrt по одной из известных инструкций
+(например, [SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools)),
+затем — как выше.
+
+## Вход в веб-интерфейс восстановления
+
+1. Выключите роутер, зажмите **Reset**, включите питание и держите кнопку
+   несколько секунд (кнопка задаётся переменной `glbtn_key`, по умолчанию
+   `reset,wps,mesh`).
+2. Подключите ПК кабелем в LAN-порт (если не открывается — попробуйте другой
+   LAN-порт). Адрес ПК выдаётся по DHCP, либо задайте `192.168.1.2/24`.
+3. Откройте **http://192.168.1.1** (или `http://failsafe.lan`).
+
+Веб-интерфейс открывается и автоматически, если загрузить прошивку не
+удалось.
+
+## Установка прошивки
+
+На странице **Firmware update** выберите **разметку** и файл:
+
+| Прошивка | Разметка | Файл |
 | --- | --- | --- |
-| default | Recommend for devices with stock/custom partition layout, enable MTK-NMBM, suitable for most users | stock/custom layout firmware |
-| nonmbm | Recommend for devices with stock/custom partition layout, with MTK-NMBM disabled | stock/custom layout firmware without MTK-NMBM |
-| ubootmod | With some modifications for better compatibility with OpenWrt/ImmortalWrt firmware | ubootmod layout firmware |
-| ubi | Designed for UBI layout(such as: `spi-nand0:1024k(bl2),-(ubi)`) | ubi layout firmware |
-| openwrt | From the official OpenWrt repository, it currently has no failsafe web UI | OpenWrt official firmware |
+| OpenWrt 24.10 / 25.12 | `openwrt` | `openwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
+| ImmortalWrt 24.10+ | `openwrt` | `immortalwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
+| Сборки на стоковой разметке (Kwrt, ImmortalWrt mt798x…) | `default` | `*-squashfs-sysupgrade.bin` (tar с `kernel` и `root`) |
+| Сток из резервной копии | `default` | сырой образ UBI (`UBI#…`), снятый со стокового раздела `ubi` |
 
----
+При смене разметки раздел `ubi` полностью стирается и создаётся заново, а
+выбранная разметка сохраняется в окружении U-Boot только после успешной
+записи. Раздел `factory` при этом не трогается.
 
-Other options:
+Initramfs (например, `…-initramfs-recovery.itb` OpenWrt) можно загрузить в
+память со страницы **Load initramfs** — без записи во флеш.
 
-| Option | type | required | default | description |
-| --- | --- | --- | --- | --- |
-| SOC | string | false | null | Auto detected, you can set SOC=mt7981, SOC=mt7986 or other mt798x platforms |
-| MULTI_LAYOUT | boolean | false | 1 | You can set MULTI_LAYOUT=0 to disable multi-layout support(Only for nand devices) |
-| FIXED_MTDPARTS | boolean | false | 1 | You can set FIXED_MTDPARTS=0 to make mtdparts editable, but it may cause some issues if you don't know what you are doing, so it's default to 1 to use fixed mtdparts.(Only for nand devices) |
-| FSTHEME | string | false | bootstrap | You can set FSTHEME=bootstrap/gl/mtk to change the failsafe web UI theme, bootstrap/gl/mtk |
-| SIMG | boolean | false | null | SIMG=1 means enable single image upgrade support in the failsafe web UI, but it may cause some issues if you don't know what you are doing, so it's default to 0 to disable it. |
-| UBIMNG | boolean | false | 0 | UBIMNG=1 enables UBI volume management in the failsafe web UI. Requires MTD device with UBI support. |
-| TELNETD | boolean | false | 0 | TELNETD=1 enables the RFC 854 compliant telnet server in failsafe mode. Provides U-Boot CLI access over TCP port 23. |
-| CLEAN | boolean | false | null | Pass `--clean` to clean the build environment before build |
+### Переключить разметку без перепрошивки
 
-> CAN'T ENABLE MULTI_LAYOUT=1 and FIXED_MTDPARTS=0 at the same time
+Если прошивка нужной разметки уже записана (например, вы заменили загрузчик
+на роутере с официальным OpenWrt), в веб-интерфейсе на странице
+**Environment** задайте `mtd_layout` = `openwrt` (или `default`), сохраните и
+перезагрузитесь. Из консоли U-Boot:
 
-Generated files will be in the `output`
-
-For direct `*.sh` usage details, please see [`doc/tools.md`](./document/tools.md).
-
-## Use Actions to build
-
-You need to fork this repository to your own account, and then you can use Actions to build the binaries. The generated files will be in the `artifacts` or `releases` page.
-
-- [x] Build FIP
-  - [x] single-board/all/all-mt798x
-  - [x] Version 2025/SP1/SP2/all
-  - [ ] VARIANT
-  - [ ] Extra Options
-  > VERSION:all only for single-board
-- [x] Build GPT
-  - [x] Official layout
-  - [ ] Custom layout
-- [x] Build BL2
-  - [x] RAMBOOT
-  - [ ] OC profiles
-
-> if you want to build old versions(<2025), you can checkout the "old-version" branch
->
-> This branch only keeps 2025/SP1/SP2 support.
-
-## Generate GPT with python2.7
-
-> install dependencies
-
-```bash
-sudo apt-get install python2 python2-dev
+```
+setenv mtd_layout openwrt; setenv mtd_layout_label openwrt; saveenv; reset
 ```
 
-> run
+Пока переменная не задана, используется разметка `default`. На флешке с
+официальным OpenWrt U-Boot с разметкой `default` просто не сможет
+подключить UBI (он больше раздела) и откроет веб-интерфейс — данные при этом
+не меняются.
 
-```bash
-make gpt
+## Возврат со «openwrt» на сток
+
+Стоковое ядро ищет таблицы NMBM в последних 8 МБ флешки, а официальный
+OpenWrt использует эту область под UBI. После OpenWrt таблиц NMBM там уже нет,
+и сток загрузится только если его ядро умеет создавать NMBM заново. Поэтому
+надёжный путь назад — **полная резервная копия флешки, снятая на стоке**
+(страница **Backup**), которую восстанавливают целиком через **Flash** или
+UART. Сборки на стоковой разметке (Kwrt, ImmortalWrt mt798x) обычно создают
+NMBM сами.
+
+## Проверка калибровки Wi-Fi (раздел `factory`)
+
+В OpenWrt:
+
+```sh
+cat /proc/mtd                      # номер раздела "factory", например mtd2
+dd if=/dev/mtd2 of=/tmp/factory.bin
+ls -l /tmp/factory.bin             # 2097152 байт
+hexdump -C -n 16 /tmp/factory.bin  # начало "86 79" (MT7986), а не "ff ff"
+hexdump -C -s 0x1fef20 -n 12 /tmp/factory.bin   # два MAC-адреса, не ff
+dmesg | grep -i eeprom             # "use default bin" = калибровки нет
+cmp /tmp/factory.bin /tmp/factory-backup.bin && echo ОДИНАКОВЫЕ
 ```
 
-Generated files will be in the `output_gpt`
+Из бэкапа всей флешки (ровно 134217728 байт) раздел вырезается так:
+`dd if=full.bin of=/tmp/factory-backup.bin bs=64k skip=24 count=32`.
 
-> You need to add your device's partition info JSON file in the "mt798x_gpt" directory, e.g. "atf-dir/tools/dev/gpt_editor/example/gpt.json".
+Восстанавливать — только если отличается и бэкап правильный (2097152 байт,
+начинается с `86 79`):
 
-When you enable `SDMMC=1` (e.g. `make gpt SDMMC=1`), the generated GPT image will support MTK SDMMC.
-
-### Show GPT info
-
-Create a directory named `mt798x_gpt_bin` in the repository root directory, and put your GPT bin files in it.
-
-Then run:
-
-```bash
-make gpt SHOW=1
+```sh
+apk update && apk add kmod-mtd-rw     # OpenWrt 24.10: opkg update && opkg install kmod-mtd-rw
+insmod mtd-rw i_want_a_brick=1
+mtd write /tmp/factory-backup.bin factory
 ```
-
-Then it will display the GPT partition info of all GPT bin files in `mt798x_gpt_bin` directory, and output the results to `gpt_info.txt` in the `output_gpt` directory.
-
-### Draw GPT layout
-
-Install `Pillow` library:
-
-```bash
-pip3 install Pillow
-```
-
-Then run:
-
-```bash
-make gpt DRAW=1
-```
-
-## Compile ATF
-
-```bash
-make atf
-```
-
-Then it will generate BL2 in the `output` directory. Normally, it will generate a ramboot BL2.
-
-### Overclocking profiles
-
-Adjusting ARMPLL frequency is a **very dangerous** operation.
-
-**It may cause some issues if you don't know what you are doing, and may cause your device to be bricked!**
-
-So it's default to the stock frequency for safety, but you can enable the OC profiles to adjust the ARMPLL frequency, but please be careful when using it.
-
-- For mt7981, now support OC to 1.4GHz~1.8GHz, and the OC profiles are in the `mt798x_atf/mt7981` directory.
-
-  e.g. to build the 1.6GHz OC BL2 you need configure:
-
-  ```makefile
-  MT7981_ARMPLL_FREQ_1600=y
-  ```
-
-- For mt7986, now support OC to 2.5GHz, or underclock to 1.6GHz, and the OC profiles are in the `mt798x_atf/mt7986` directory.
-
-  e.g. to build the 2.3GHz OC BL2 you need configure:
-
-  ```makefile
-  MT7986_ARMPLL_FREQ_2300=y
-  ```
-
-> Limit each adjustment to 100MHz for mt798x, and limit each adjustment to 50MHz for mt762x. It is recommended to adjust the frequency step by step, e.g. from 1.6GHz to 1.7GHz, then to 1.8GHz.
-
-ARMPLL frequency range adjustment support for different platforms:
-
-| Version | mt7622 | mt7629 | mt7981 | mt7986 | mt7987 | mt7988 |
-| --- | --- | --- | --- | --- | --- | --- |
-| TF-A 2024 | No | No | 1.3GHz~1.8GHz | 1.6GHz~2.5GHz | N/A | No |
-| TF-A 2025 | 1.35GHz~1.7GHz | 1.2GHz~1.5GHz | 1.3GHz~1.8GHz | 1.6GHz~2.5GHz | No | No |
-| TF-A 2026 | No | No | No | No | No | No |
-
-### Other Options
-
-These options only work for the `normal` directory.
-
-| Option | type | required | default | description |
-| --- | --- | --- | --- | --- |
-| VARIANT | string | false | null | You can set VARIANT=NONMBM/UBOOTMOD to build different BL2 variants, NONMBM means build BL2 with MTK-NMBM disabled, UBOOTMOD means build BL2 with some modifications for better compatibility with OpenWrt/ImmortalWrt firmware, but it may cause some issues if you don't know what you are doing, so it's default to null to use the default BL2 variant. |
-| OC7981 | int | false | null | You can set OC7981=13-18 to build BL2 with different OC profiles for mt7981, FREQ=OC7981*100MHz, e.g. OC7981=16 means 1.6GHz, but it may cause some issues if you don't know what you are doing, so it's default to null to use the default OC profile. |
-| OC7986 | int | false | null | You can set OC7986=16-25 to build BL2 with different OC profiles for mt7986, FREQ=OC7986*100MHz, e.g. OC7986=23 means 2.3GHz, but it may cause some issues if you don't know what you are doing, so it's default to null to use the default OC profile. |
-
----
-
-## FIT support
-
-**You MUST test it yourself, and there is a risk of BRICKING your device!**
-
-There are two ways to build:
-
-- Local Build
-
-  ```bash
-  make BOARD=your_board VERSION=2025 VARIANT=ubootmod
-  ```
-
-- Use Action to build
-
-How to flash:
-
-1. Use failsafe WEB UI to back up [1*](#endnote) **all your flash and partitions**; this is very **important**!
-
-2. Update BL2 in the WEB UI to flash the preloader provided by OpenWrt/ImmortalWrt ubootmod firmware.
-
-3. Update U-Boot in the WEB UI to flash the **FIT version FIP**.
-
-4. Use Flash Editor in the WEB UI to erase the UBI partition (or use the command line: `mtd erase ubi`); this step is only for NAND devices.
-
-5. Try upgrade in firmware upgrade page with the OpenWrt/ImmortalWrt ubootmod firmware[2*](#endnote) [3*](#endnote), if not work, try next step.
-
-6. Use failsafe WEB UI Initramfs to boot the OpenWrt/ImmortalWrt ubootmod Initramfs image.
-
-7. If the device can boot into OpenWrt/ImmortalWrt successfully, then you can try upgrade in firmware upgrade page with the OpenWrt/ImmortalWrt ubootmod firmware again.
-
----
-
-## The best practices
-
-1. Use TTL tools to connect to the serial port, and use [MTK UARTBOOT](https://github.com/981213/mtk_uartboot/releases)/[MTK-LAUNCHPAD](https://github.com/Yuzhii0718/mtk-launchpad) to ramboot
-
-2. In the Web UI(Quick Access `http://failsafe.lan`), back up all your flash and partitions [1*](#endnote); this is very important!
-
-3. Update U-Boot in the WEB UI and upgrade firmware
-
-4. Restore the backup if something goes wrong
-
-### Enter failsafe by uBootEnter/BreedEnter
-
-We can enter failsafe mode by network without physical operation, more details can be found in the [uBootEnter](https://github.com/chenxin527/uBootEnter) and [BreedEnter](https://breed.hackpascal.net/) projects.
-
-### Change failsafe WEB UI start key
-
-Default set `glbtn_key=reset,wps,mesh`, it means the glbtn command will search for GPIOs with labels "reset", "wps" and "mesh" in order, and use the first one found as the failsafe WEB UI start key.
-
-The following priorities are now supported:
-
-- `glbtn_gpio=<gpio>`
-  → Directly read the GPIO.
-- `glbtn_key=<label>`
-  → Still search by label.
-
-e.g.
-
-- Specify only GPIO:
-  `setenv glbtn_gpio 0`
-- With the `gpio:` prefix:
-  `setenv glbtn_gpio gpio:0`
-  > 0, gpio 0, pio 0, gpio:0, pio0.
-- Flip the signal:
-  `setenv glbtn_gpio !0`
-  > !gpio 0, !pio 0, !gpio:0, !pio0.
-- Scan gpio-keys:
-  `setenv glbtn_key wps`
-  > wps, reset, mesh...
-
-> Then you need saveenv and reboot to apply.
-
-### Change MTD partition layout manually
-
-Only for multi-layout devices
-
-Set mtdparts environment variable to the partition layout you want to use, and reboot to apply.
-
-```bash
-# Current method
-setenv mtd_layout <label>
-# legacy method
-setenv mtd_layout_label <label>
-```
-
-> Then you need saveenv and reboot to apply.
-
-### Disable auto-reboot after upgrade
-
-Set failsafe_auto_reboot environment variable to 1/true/yes/on to enable auto reboot after upgrade(New WEB UI).
-
-### Some commands in firmware
-
-```bash
-fw_setenv env_invalid 1 # Reset environment to default values in next boot
-fw_setenv failsafe 1 # Reboot to failsafe mode in next boot
-```
-
-> You need to install `uboot-envtools` and configure `package/boot/uboot-envtools/files/mediatek_filogic` correctly for your device before compiling firmware; otherwise, the environment variables will not work.
-
-### Telnet support
-
-You can connect to the device with telnet, default port is 23, and you can set the `telnet_port` environment variable to change the port.
-
-TelnetD is enabled by default, but you can set the `telnetd_enable` environment variable to 0 to disable it.
-
-### Unified env-controlled NMBM enablement(Only for MTD devices)
-
-You can set `nmbm_enable` environment variable to 0/false/no/off to disable MTK-NMBM.
-
-> Only for MTD devices which enable MTK-NMBM configs before compile.
-
-More information about the NMBM enablement can be found in the [unified env-controlled NMBM enablement](./document/unified-env-controlled-NMBM-enablement.md) documentation.
-
----
-
-## Endnote
-
-1*: If your device is a MMC device, back up all flash is not feasible. It depends on the size of the firmware, which is usually 200MB to 300MB.
-
-2*: If your device is a MMC device, you need upgrade GPT table which has production partition, then you needn't use ubootmod firmware, you can use the OpenWrt official firmware directly.
-
-3*: The OpenWrt/ImmortalWrt ubootmod firmware is a special firmware with FIT support, in this firmware, devicetree is loaded from the FIT image(bootargs = "root=/dev/fit0 rootwait"), and loaded from ubi_rootdisk. You'd better use a version after OpenWrt/ImmortalWrt 24.10.
-
----
-
-## Old Version ( < U-Boot 2025 )
-
-Current branch only supports **2025/SP1/SP2**.
-
-**You can find old versions (such as 2022/2023/2024) in the "old-version" branch, but they may have some issues, so it is recommended to use the current branch for a better experience.**
-
-- <https://cmi.hanwckf.top/p/mt798x-uboot-usage>
-
----
-
-## MTMIPS
-
-**It only for development and testing, not recommended for production use.**
-
-```bash
-chmod +x mtmips.sh
-SOC=<mt7620|mt7621|mt7628|mt7688> BOARD=<board_name> ./mtmips.sh
-```
-
-but it not preferred, because the mt7621 u-boot has some issues on uboot-mtk-20250711.
-
-It may cause some issues if you don't know what you are doing, so it's recommended to use the [uboot-mt7621-dhcpd](https://github.com/Yuzhii0718/uboot-mt7621-dhcpd) project for mt7621 devices, which is more stable and has better support for mt7621 devices.
-
----
-
-## Acknowledgement
-
-- [u-boot](https://github.com/u-boot/u-boot)
-- [mtk-openwrt](https://github.com/mtk-openwrt)
-- [hanwckf](https://github.com/hanwckf/bl-mt798x)
-- [Tianling](https://blog.imouto.in/)
