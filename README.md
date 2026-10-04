@@ -7,6 +7,8 @@ Supports GitHub Actions for automatic builds, and can generate both normal and o
 > [!CAUTION]
 > **Warning: Flashing custom bootloaders can brick your device. Proceed with caution and at your own risk.**
 
+> **Netis NX62 / Netcore N60 Pro:** multi-layout bootloader (stock + official OpenWrt, no NMBM) — see [document/netis-nx62.md](document/netis-nx62.md) and the `Build Netis NX62 bootloader` GitHub Actions workflow.
+
 ## About bl-mt798x
 
 > [!NOTE]
