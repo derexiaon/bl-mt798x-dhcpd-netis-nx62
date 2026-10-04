@@ -44,9 +44,7 @@ echo "upstream commit: $UPSTREAM_SHA"
 
 step "Add Netis NX62 board files"
 cp "$TOP/board/mt7986a-netis-nx62.dts" "$SRC/$UBOOT_DIR/arch/arm/dts/"
-cp "$TOP/board/mt7986_netis_nx62_defconfig" \
-   "$TOP/board/mt7986_netis_nx62_multi_layout_defconfig" \
-   "$SRC/$UBOOT_DIR/configs-nonmbm/"
+cp "$TOP/board/mt7986_netis_nx62_multi_layout_defconfig" "$SRC/$UBOOT_DIR/configs-nonmbm/"
 for d in atf-20250711 atf-20260123; do
 	cp "$TOP/board/atf_mt7986_netis_nx62_defconfig" \
 	   "$SRC/$d/configs-nonmbm/mt7986_netis_nx62_defconfig"
@@ -78,6 +76,10 @@ uboot_cfg="$SRC/$UBOOT_DIR/.config"
 fail() { echo "VERIFY FAILED: $*" >&2; exit 1; }
 [ "$(stat -c%s "$bl2")" -le $((1024 * 1024)) ] || fail "BL2 larger than the 1 MiB bl2 partition"
 [ "$(stat -c%s "$fip")" -le $((2048 * 1024)) ] || fail "FIP larger than the 2 MiB fip partition"
+# BootROM header must match the NX62 SPI-NAND (and the stock BL2):
+# "SPINAND!", 2048-byte page, 64-byte spare
+[ "$(head -c 8 "$bl2")" = "SPINAND!" ] || fail "BL2 has no SPI-NAND BootROM header"
+[ "$(od -An -tu4 -j16 -N8 "$bl2" | tr -s ' ')" = " 2048 64" ] || fail "BL2 header is not for 2K page / 64B spare NAND"
 grep -q '^_NAND_SKIP_BAD=y' "$atf_cfg" || fail "BL2 is not built with skip-bad"
 grep -q '^NMBM=1' "$atf_cfg" && fail "BL2 is built with NMBM"
 grep -q '^MT7986_TRNG_NS_ACCESS=1' "$atf_cfg" || fail "TRNG access for the stock kernel is off"

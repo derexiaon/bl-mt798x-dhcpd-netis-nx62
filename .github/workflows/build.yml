@@ -22,6 +22,11 @@ on:
         required: false
         default: false
         type: boolean
+      delete_old_releases:
+        description: 'After publishing, delete all older releases and their tags'
+        required: false
+        default: true
+        type: boolean
   push:
   # Weekly trial build against the latest upstream, to notice breakage early
   schedule:
@@ -139,12 +144,12 @@ jobs:
           target_commitish: ${{ github.sha }}
           body: |
             Netis NX62 / Netcore N60 Pro: BL2 + FIP, multi-layout, no NMBM, DHCP + failsafe web UI.
-            Layouts: `default` (stock, ubi 117248k) and `openwrt` (official OpenWrt netcore_n60-pro, ubi 125440k).
+            Layouts: `default` (stock, ubi 117248k) and `openwrt` (official OpenWrt 25.12+ / ImmortalWrt 24.10+ netcore_n60-pro, ubi 125440k).
             Upstream bl-mt798x-dhcpd: ${{ steps.meta.outputs.upstream }}
             Read README-netis-nx62.md before flashing.
 
             Netis NX62 / Netcore N60 Pro: BL2 + FIP, multi-layout, без NMBM, DHCP + веб-интерфейс восстановления.
-            Разметки: `default` (сток, ubi 117248k) и `openwrt` (официальный OpenWrt netcore_n60-pro, ubi 125440k).
+            Разметки: `default` (сток, ubi 117248k) и `openwrt` (официальный OpenWrt 25.12+ / ImmortalWrt 24.10+ netcore_n60-pro, ubi 125440k).
             Перед прошивкой прочитайте README-netis-nx62.ru.md.
           files: |
             dist/*.img
@@ -152,3 +157,17 @@ jobs:
             dist/SHA256SUMS
             dist/README-netis-nx62.md
             dist/README-netis-nx62.ru.md
+
+      - name: Delete older releases
+        if: github.event.inputs.delete_old_releases == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NEW_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          gh release list --limit 500 --json tagName --jq '.[].tagName' |
+          while read -r tag; do
+            [ "$tag" = "$NEW_TAG" ] && continue
+            echo "Deleting release $tag"
+            gh release delete "$tag" --cleanup-tag --yes
+          done

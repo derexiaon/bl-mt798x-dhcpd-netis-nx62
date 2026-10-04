@@ -12,7 +12,7 @@ The flash layout is selected in the web UI when flashing firmware:
 | Layout (`mtd_layout`) | Firmware | `ubi` partition |
 | --- | --- | --- |
 | `default` | stock Netis/Netcore firmware; builds on the stock NMBM layout (Kwrt, ImmortalWrt mt798x, etc.) | `117248k` (0x580000–0x7800000) |
-| `openwrt` | official OpenWrt 24.10 / 25.12 and ImmortalWrt 24.10+, device `netcore_n60-pro` | `125440k` (0x580000–0x8000000) |
+| `openwrt` | official OpenWrt 25.12+ and ImmortalWrt 24.10+, device `netcore_n60-pro` | `125440k` (0x580000–0x8000000) |
 
 The start of the flash is the same for both layouts:
 `1024k(bl2),512k(u-boot-env),2048k(factory),2048k(fip)`.
@@ -56,8 +56,9 @@ sources are downloaded at build time.
 **Build checks**
 
 The build fails instead of producing an image if BL2 or U-Boot is built with
-NMBM, a layout is missing, the model is wrong, an image doesn't fit its
-partition, or a layout writes firmware to a partition other than `ubi`.
+NMBM, the BL2 header doesn't match the NX62 NAND (2 KB page, 64 B spare — same
+as the stock BL2), a layout is missing, the model is wrong, an image doesn't
+fit its partition, or a layout writes firmware to a partition other than `ubi`.
 
 ## Repository layout
 
@@ -65,8 +66,7 @@ partition, or a layout writes firmware to a partition other than `ubi`.
 | --- | --- |
 | `build.sh` | fetches upstream, adds the NX62 files, applies the patches, builds and verifies |
 | `board/mt7986a-netis-nx62.dts` | board description: model, layouts, LEDs |
-| `board/mt7986_netis_nx62_defconfig` | U-Boot config (single layout) |
-| `board/mt7986_netis_nx62_multi_layout_defconfig` | U-Boot config (multi-layout, the one used) |
+| `board/mt7986_netis_nx62_multi_layout_defconfig` | U-Boot config |
 | `board/atf_mt7986_netis_nx62_defconfig` | BL2/BL31 config: DDR4, SPI-NAND without NMBM, TRNG for the stock kernel |
 | `patches/` | fixes on top of upstream |
 | `.github/workflows/build.yml` | GitHub Actions build |
@@ -82,7 +82,8 @@ partition, or a layout writes firmware to a partition other than `ubi`.
    - `SP2 + 2025` — build both.
 3. `upstream_ref` — leave empty (tested upstream commit) or set `master` to
    build on the latest upstream.
-4. *Publish a GitHub Release* additionally creates a release with the files.
+4. *Publish a GitHub Release* additionally creates a release with the files;
+   *Delete older releases* removes the previous ones.
 5. Result — artifact `netis_nx62-bootloader-<version>`:
    - `netis_nx62-<version>-bl2.img` — BL2 (`bl2` partition);
    - `netis_nx62-<version>-fip.bin` — BL31 + U-Boot (`fip` partition);
@@ -134,7 +135,7 @@ partitions are write-protected in OpenWrt, so the `mtd-rw` module is needed:
 
 ```sh
 apk update && apk add kmod-mtd-rw        # OpenWrt 25.12
-# opkg update && opkg install kmod-mtd-rw # OpenWrt 24.10 and older
+# opkg update && opkg install kmod-mtd-rw # opkg-based builds (ImmortalWrt 24.10, etc.)
 insmod mtd-rw i_want_a_brick=1
 
 cd /tmp
@@ -174,7 +175,7 @@ On the **Firmware update** page select the **layout** and the file:
 
 | Firmware | Layout | File |
 | --- | --- | --- |
-| OpenWrt 24.10 / 25.12 | `openwrt` | `openwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
+| OpenWrt 25.12+ | `openwrt` | `openwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
 | ImmortalWrt 24.10+ | `openwrt` | `immortalwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
 | Stock-layout builds (Kwrt, ImmortalWrt mt798x…) | `default` | `*-squashfs-sysupgrade.bin` (tar with `kernel` and `root`) |
 | Stock from a backup | `default` | raw UBI image (`UBI#…`) taken from the stock `ubi` partition |
@@ -198,8 +199,9 @@ setenv mtd_layout openwrt; setenv mtd_layout_label openwrt; saveenv; reset
 ```
 
 Until the variable is set, the `default` layout is used. On a flash with
-official OpenWrt, U-Boot with the `default` layout simply fails to attach UBI
-(it is larger than the partition) and opens the web UI — no data is changed.
+official OpenWrt, U-Boot with the `default` layout fails to attach UBI (it is
+larger than the partition) and opens the web UI; the firmware is not
+damaged — the normal boot path only reads UBI.
 
 ## Going back from `openwrt` to stock
 

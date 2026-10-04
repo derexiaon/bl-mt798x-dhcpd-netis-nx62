@@ -12,7 +12,7 @@ BL2 + FIP (BL31 + U-Boot с DHCP-сервером и веб-интерфейсо
 | Разметка (`mtd_layout`) | Для какой прошивки | Раздел `ubi` |
 | --- | --- | --- |
 | `default` | стоковая прошивка Netis/Netcore; сборки на стоковой разметке с NMBM (Kwrt, ImmortalWrt mt798x и т.п.) | `117248k` (0x580000–0x7800000) |
-| `openwrt` | официальный OpenWrt 24.10 / 25.12 и ImmortalWrt 24.10+, устройство `netcore_n60-pro` | `125440k` (0x580000–0x8000000) |
+| `openwrt` | официальный OpenWrt 25.12+ и ImmortalWrt 24.10+, устройство `netcore_n60-pro` | `125440k` (0x580000–0x8000000) |
 
 Начало флешки одинаково для обеих разметок:
 `1024k(bl2),512k(u-boot-env),2048k(factory),2048k(fip)`.
@@ -56,8 +56,9 @@ BL2 + FIP (BL31 + U-Boot с DHCP-сервером и веб-интерфейсо
 **Проверки при сборке**
 
 Сборка падает, а не выпускает образ, если BL2 или U-Boot собраны с NMBM,
-нет одной из разметок, неверная модель, образ не помещается в раздел или
-какая-то разметка пишет прошивку не в раздел `ubi`.
+заголовок BL2 не подходит к NAND роутера (страница 2 КБ, spare 64 Б — как у
+стокового BL2), нет одной из разметок, неверная модель, образ не помещается
+в раздел или какая-то разметка пишет прошивку не в раздел `ubi`.
 
 ## Состав репозитория
 
@@ -65,8 +66,7 @@ BL2 + FIP (BL31 + U-Boot с DHCP-сервером и веб-интерфейсо
 | --- | --- |
 | `build.sh` | скачивает upstream, добавляет файлы NX62, накладывает патчи, собирает и проверяет |
 | `board/mt7986a-netis-nx62.dts` | описание платы: модель, разметки, светодиоды |
-| `board/mt7986_netis_nx62_defconfig` | конфигурация U-Boot (одна разметка) |
-| `board/mt7986_netis_nx62_multi_layout_defconfig` | конфигурация U-Boot (multi-layout, используется) |
+| `board/mt7986_netis_nx62_multi_layout_defconfig` | конфигурация U-Boot |
 | `board/atf_mt7986_netis_nx62_defconfig` | конфигурация BL2/BL31: DDR4, SPI-NAND без NMBM, TRNG для стока |
 | `patches/` | исправления поверх upstream |
 | `.github/workflows/build.yml` | сборка в GitHub Actions |
@@ -82,7 +82,8 @@ BL2 + FIP (BL31 + U-Boot с DHCP-сервером и веб-интерфейсо
    - `SP2 + 2025` — собрать обе.
 3. `upstream_ref` — оставьте пустым (проверенный коммит upstream) или
    укажите `master`, чтобы собрать на самой свежей версии.
-4. Галочка *Publish a GitHub Release* дополнительно создаёт релиз с файлами.
+4. Галочка *Publish a GitHub Release* дополнительно создаёт релиз с файлами,
+   *Delete older releases* удаляет предыдущие релизы.
 5. Результат — артефакт `netis_nx62-bootloader-<версия>`:
    - `netis_nx62-<версия>-bl2.img` — BL2 (раздел `bl2`);
    - `netis_nx62-<версия>-fip.bin` — BL31 + U-Boot (раздел `fip`);
@@ -135,7 +136,7 @@ UPSTREAM_REF=master ./build.sh
 
 ```sh
 apk update && apk add kmod-mtd-rw        # OpenWrt 25.12
-# opkg update && opkg install kmod-mtd-rw # OpenWrt 24.10 и старше
+# opkg update && opkg install kmod-mtd-rw # сборки с opkg (ImmortalWrt 24.10 и т.п.)
 insmod mtd-rw i_want_a_brick=1
 
 cd /tmp
@@ -176,7 +177,7 @@ mtd write netis_nx62-SP2-bl2.img bl2 && mtd verify netis_nx62-SP2-bl2.img bl2
 
 | Прошивка | Разметка | Файл |
 | --- | --- | --- |
-| OpenWrt 24.10 / 25.12 | `openwrt` | `openwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
+| OpenWrt 25.12+ | `openwrt` | `openwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
 | ImmortalWrt 24.10+ | `openwrt` | `immortalwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
 | Сборки на стоковой разметке (Kwrt, ImmortalWrt mt798x…) | `default` | `*-squashfs-sysupgrade.bin` (tar с `kernel` и `root`) |
 | Сток из резервной копии | `default` | сырой образ UBI (`UBI#…`), снятый со стокового раздела `ubi` |
@@ -200,9 +201,9 @@ setenv mtd_layout openwrt; setenv mtd_layout_label openwrt; saveenv; reset
 ```
 
 Пока переменная не задана, используется разметка `default`. На флешке с
-официальным OpenWrt U-Boot с разметкой `default` просто не сможет
-подключить UBI (он больше раздела) и откроет веб-интерфейс — данные при этом
-не меняются.
+официальным OpenWrt U-Boot с разметкой `default` не сможет подключить UBI
+(он больше раздела) и откроет веб-интерфейс; прошивка при этом не
+пострадает — при обычной загрузке UBI только читается.
 
 ## Возврат с `openwrt` на сток
 
