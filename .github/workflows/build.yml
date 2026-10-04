@@ -99,6 +99,7 @@ jobs:
         run: |
           mkdir -p output
           cp README.md output/README-netis-nx62.md
+          cp README.ru.md output/README-netis-nx62.ru.md
           gzip -9c build.log > output/build-${{ matrix.version }}.log.gz || true
 
       - name: Upload artifact
@@ -137,12 +138,17 @@ jobs:
           name: Netis NX62 bootloader ${{ steps.meta.outputs.tag }}
           target_commitish: ${{ github.sha }}
           body: |
+            Netis NX62 / Netcore N60 Pro: BL2 + FIP, multi-layout, no NMBM, DHCP + failsafe web UI.
+            Layouts: `default` (stock, ubi 117248k) and `openwrt` (official OpenWrt netcore_n60-pro, ubi 125440k).
+            Upstream bl-mt798x-dhcpd: ${{ steps.meta.outputs.upstream }}
+            Read README-netis-nx62.md before flashing.
+
             Netis NX62 / Netcore N60 Pro: BL2 + FIP, multi-layout, без NMBM, DHCP + веб-интерфейс восстановления.
             Разметки: `default` (сток, ubi 117248k) и `openwrt` (официальный OpenWrt netcore_n60-pro, ubi 125440k).
-            Upstream bl-mt798x-dhcpd: ${{ steps.meta.outputs.upstream }}
-            Перед прошивкой прочитайте README-netis-nx62.md.
+            Перед прошивкой прочитайте README-netis-nx62.ru.md.
           files: |
             dist/*.img
             dist/*.bin
             dist/SHA256SUMS
             dist/README-netis-nx62.md
+            dist/README-netis-nx62.ru.md

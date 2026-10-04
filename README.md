@@ -1,236 +1,239 @@
-# Netis NX62 / Netcore N60 Pro: загрузчик с multi-layout
+# Netis NX62 / Netcore N60 Pro: multi-layout bootloader
 
-BL2 + FIP (BL31 + U-Boot с DHCP-сервером и веб-интерфейсом восстановления) для
-**Netis NX62** (аппаратный двойник **Netcore N60 Pro**): MT7986A, DDR4
-512 МБ / 1 ГБ / 2 ГБ, SPI-NAND 128 МБ (страница 2 КБ, блок 128 КБ).
+**English** | [Русский](README.ru.md)
 
-В веб-интерфейсе устройство называется **Netis NX62**. Загрузчик умеет две
-разметки флешки и переключается между ними прямо при прошивке:
+BL2 + FIP (BL31 + U-Boot with a DHCP server and a failsafe web UI) for the
+**Netis NX62** (hardware twin of the **Netcore N60 Pro**): MT7986A, DDR4
+512 MB / 1 GB / 2 GB, 128 MB SPI-NAND (2 KB page, 128 KB block).
 
-| Разметка (`mtd_layout`) | Для какой прошивки | Раздел `ubi` |
+The web UI shows the device as **Netis NX62**. The bootloader supports two
+flash layouts and switches between them when you flash firmware:
+
+| Layout (`mtd_layout`) | Firmware | `ubi` partition |
 | --- | --- | --- |
-| `default` | стоковая прошивка Netis/Netcore; сборки на стоковой разметке с NMBM (Kwrt, ImmortalWrt mt798x и т.п.) | `117248k` (0x580000–0x7800000) |
-| `openwrt` | официальный OpenWrt 24.10 / 25.12 и ImmortalWrt 24.10+, устройство `netcore_n60-pro` | `125440k` (0x580000–0x8000000) |
+| `default` | stock Netis/Netcore firmware; builds on the stock NMBM layout (Kwrt, ImmortalWrt mt798x, etc.) | `117248k` (0x580000–0x7800000) |
+| `openwrt` | official OpenWrt 24.10 / 25.12 and ImmortalWrt 24.10+, device `netcore_n60-pro` | `125440k` (0x580000–0x8000000) |
 
-Начало флешки одинаково для обеих разметок:
+The start of the flash is the same for both layouts:
 `1024k(bl2),512k(u-boot-env),2048k(factory),2048k(fip)`.
 
-## Почему прошлые сборки работали нестабильно
+## Why earlier builds were unstable
 
-1. **NMBM.** Стоковая прошивка работает через NMBM: в последних 8 МБ флешки
-   лежат служебные таблицы NMBM. Официальный OpenWrt NMBM не использует и
-   занимает флешку до конца. Загрузчик с NMBM (вариант `default` этого
-   репозитория, а также стоковый BL2) **при каждой загрузке** ищет и, если не
-   находит, заново записывает таблицы NMBM в конец флешки — прямо поверх
-   блоков UBI официального OpenWrt. Отсюда «плавающие» ошибки UBI.
-   Эта сборка (вариант `nonmbm`) работает с NAND напрямую, как официальный
-   загрузчик OpenWrt: BL2 пропускает bad-блоки (`_NAND_SKIP_BAD`), U-Boot
-   использует `spi-nand0`. Разметка `default` не касается области NMBM, так
-   что стоковое ядро продолжает работать со своими таблицами.
-2. **Неверная разметка в DTS.** В прошлой попытке `factory_part = "factory"`:
-   это раздел, *куда веб-интерфейс пишет прошивку*, то есть прошивка
-   записалась бы в раздел калибровки Wi-Fi. Кроме того, раздел `ubi` был
-   `-(ubi)` поверх NMBM, а `sysupgrade_rootfs_ubipart` указывал на
-   несуществующий раздел `rootfs_data`.
-3. **Смена разметки при подключённом UBI.** Если UBI уже был подключён
-   (например, после неудачной попытки загрузки), U-Boot не мог пересоздать
-   разделы новой разметки и писал прошивку в старый раздел `ubi`. Теперь при
-   смене разметки UBI отключается, а раздел `ubi` новой разметки стирается
-   перед записью — от старой разметки ничего не остаётся.
-4. **TRNG.** ATF 2025/2026 по умолчанию закрывает аппаратный генератор
-   случайных чисел для Linux (доступ только через SMC). Стоковое ядро 5.4
-   читает регистры TRNG напрямую и получает ошибки hwrng. Для NX62 включена
-   опция `_MT7986_TRNG_NS_ACCESS`: работает и прямой доступ (сток), и SMC
-   (OpenWrt).
-5. **Старый исходный код.** Форк отставал от upstream на 482 коммита. Теперь
-   исходники берутся прямо из актуального upstream
+1. **NMBM.** The stock firmware uses NMBM: its management tables live in the
+   last 8 MB of the flash. Official OpenWrt does not use NMBM and uses the
+   flash up to the end. A bootloader with NMBM (the `default` variant of
+   upstream, and the stock BL2) looks for these tables **on every boot** and,
+   if it can't find them, writes new ones at the end of the flash — right on
+   top of the official OpenWrt UBI blocks. That causes random UBI errors.
+   This build (`nonmbm` variant) accesses the NAND directly, like the official
+   OpenWrt bootloader: BL2 skips bad blocks (`_NAND_SKIP_BAD`), U-Boot uses
+   `spi-nand0`. The `default` layout never touches the NMBM area, so the stock
+   kernel keeps working with its tables.
+2. **Wrong layout in the DTS.** The previous attempt had
+   `factory_part = "factory"`. That is the partition *the web UI writes the
+   firmware to*, so the firmware would have overwritten the Wi-Fi calibration.
+   Also, `ubi` was `-(ubi)` on top of NMBM, and `sysupgrade_rootfs_ubipart`
+   pointed to a non-existent `rootfs_data` partition.
+3. **Layout switch while UBI is attached.** If UBI was already attached (e.g.
+   after a failed boot attempt), U-Boot could not recreate the partitions of
+   the new layout and wrote the firmware into the old `ubi` partition. Now UBI
+   is detached on a layout switch, and the `ubi` partition of the new layout
+   is erased before writing — nothing of the old layout survives.
+4. **TRNG.** ATF 2025/2026 restricts the hardware random number generator to
+   the secure world (access only via SMC). The stock kernel 5.4 reads the TRNG
+   registers directly and gets hwrng errors. For the NX62 the
+   `_MT7986_TRNG_NS_ACCESS` option is enabled: both direct access (stock) and
+   SMC (OpenWrt) work.
+5. **Outdated sources.** The fork was 482 commits behind upstream. Now the
+   sources are taken directly from the current upstream
    [Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd)
-   (новые драйверы SPI-NAND, исправления failsafe и TCP-стека). Прежнее
-   полное дерево исходников сохранено в ветке `old-full-tree`.
+   (new SPI-NAND drivers, failsafe and TCP stack fixes). The previous full
+   source tree is kept in the `old-full-tree` branch.
 
-## Как устроен репозиторий
+## Repository layout
 
-Здесь лежат только файлы, относящиеся к NX62. Исходники U-Boot и ATF
-скачиваются из upstream
+Only the NX62-specific files live here. The U-Boot and ATF sources are
+downloaded from upstream
 [Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd)
-во время сборки.
+at build time.
 
-| Файл | Что это |
+| File | Purpose |
 | --- | --- |
-| `build.sh` | скачивает upstream, добавляет файлы NX62, накладывает патчи, собирает и проверяет |
-| `board/mt7986a-netis-nx62.dts` | описание платы: модель «Netis NX62», разметки `default` и `openwrt`, светодиоды |
-| `board/mt7986_netis_nx62_defconfig` | конфигурация U-Boot (одна разметка) |
-| `board/mt7986_netis_nx62_multi_layout_defconfig` | конфигурация U-Boot (multi-layout, используется) |
-| `board/atf_mt7986_netis_nx62_defconfig` | конфигурация BL2/BL31: DDR4, SPI-NAND без NMBM, TRNG для стока |
-| `patches/0001-…TRNG…patch` | ATF: опция доступа стокового ядра к TRNG |
-| `patches/0002-…UBI…patch` | U-Boot: чистое пересоздание UBI при смене разметки |
-| `.github/workflows/build.yml` | сборка в GitHub Actions |
+| `build.sh` | fetches upstream, adds the NX62 files, applies the patches, builds and verifies |
+| `board/mt7986a-netis-nx62.dts` | board description: model "Netis NX62", `default` and `openwrt` layouts, LEDs |
+| `board/mt7986_netis_nx62_defconfig` | U-Boot config (single layout) |
+| `board/mt7986_netis_nx62_multi_layout_defconfig` | U-Boot config (multi-layout, the one used) |
+| `board/atf_mt7986_netis_nx62_defconfig` | BL2/BL31 config: DDR4, SPI-NAND without NMBM, TRNG for the stock kernel |
+| `patches/0001-…TRNG…patch` | ATF: option to let the stock kernel access the TRNG |
+| `patches/0002-…UBI…patch` | U-Boot: clean UBI rebuild on layout switch |
+| `.github/workflows/build.yml` | GitHub Actions build |
 
-## Сборка в GitHub Actions
+## Building with GitHub Actions
 
 1. **Actions → Build Netis NX62 bootloader → Run workflow.**
-2. Версия ATF:
-   - `SP2` — ATF 2026.01.23, **рекомендуется** (самая новая);
-   - `2025` — ATF 2025.07.11, запасной вариант;
-   - `SP2 + 2025` — собрать обе.
-3. `upstream_ref` — оставьте пустым (проверенный коммит upstream) или
-   укажите `master`, чтобы собрать на самой свежей версии.
-4. Галочка *Publish a GitHub Release* дополнительно создаёт релиз с файлами.
-5. Результат — артефакт `netis_nx62-bootloader-<версия>`:
-   - `netis_nx62-<версия>-bl2.img` — BL2 (раздел `bl2`);
-   - `netis_nx62-<версия>-fip.bin` — BL31 + U-Boot (раздел `fip`);
-   - `SHA256SUMS`, `upstream-commit.txt`, этот файл и лог сборки.
+2. ATF version:
+   - `SP2` — ATF 2026.01.23, **recommended** (newest);
+   - `2025` — ATF 2025.07.11, fallback;
+   - `SP2 + 2025` — build both.
+3. `upstream_ref` — leave empty (tested upstream commit) or set `master` to
+   build on the latest upstream.
+4. *Publish a GitHub Release* additionally creates a release with the files.
+5. Result — artifact `netis_nx62-bootloader-<version>`:
+   - `netis_nx62-<version>-bl2.img` — BL2 (`bl2` partition);
+   - `netis_nx62-<version>-fip.bin` — BL31 + U-Boot (`fip` partition);
+   - `SHA256SUMS`, `upstream-commit.txt`, the README in both languages and
+     the build log.
 
-Сборка сама проверяет результат: BL2 и U-Boot без NMBM, обе разметки на
-месте, модель `Netis NX62`, размеры образов, нет записи прошивки в чужой
-раздел. Если что-то не так — сборка падает, а не выпускает образ.
+The build verifies its own output: BL2 and U-Boot without NMBM, both layouts
+present, model `Netis NX62`, image sizes, no layout writing firmware to a
+foreign partition. If anything is wrong, the build fails instead of producing
+an image.
 
-Локально (Ubuntu 24.04):
+Locally (Ubuntu 24.04):
 
 ```sh
 sudo apt install build-essential bc bison flex gcc-aarch64-linux-gnu \
     device-tree-compiler libssl-dev libgnutls28-dev nodejs npm python3 git
-./build.sh                    # SP2, проверенный upstream
+./build.sh                    # SP2, tested upstream
 VERSION=2025 ./build.sh       # ATF 2025
 UPSTREAM_REF=master ./build.sh
 ```
 
-## Обновление upstream
+## Updating upstream
 
-- Каждый понедельник workflow сам пробует собрать NX62 на свежем `master`
-  upstream. Если упало — значит, upstream поменял что-то, что нужно
-  поправить в патчах или файлах платы.
-- Чтобы перейти на новую версию: запустите сборку с `upstream_ref = master`,
-  проверьте загрузчик и впишите коммит из `upstream-commit.txt` в
-  `UPSTREAM_PINNED` в `build.sh`.
-- Конфликтов слияния с upstream нет: в репозитории только свои файлы.
+- Every Monday the workflow tries to build the NX62 on the latest upstream
+  `master`. If it fails, upstream changed something that needs fixing in the
+  patches or board files.
+- To move to a new version: run the build with `upstream_ref = master`, test
+  the bootloader and put the commit from `upstream-commit.txt` into
+  `UPSTREAM_PINNED` in `build.sh`.
+- There are no merge conflicts with upstream: the repository only contains
+  its own files.
 
-## Перед прошивкой
+## Before flashing
 
-> **Внимание.** Замена BL2 — операция с риском «кирпича». Восстановление
-> после неудачи возможно только через UART и mtk_uartboot. Всё делаете на
-> свой риск. Сборка проверена компиляцией и статически, на живом роутере —
-> нет.
+> **Warning.** Replacing BL2 can brick the router. Recovery after a failure
+> is only possible over UART with mtk_uartboot. Do it at your own risk. The
+> build has been verified by compilation and static checks, not on real
+> hardware.
 
-- Нужно прошить **оба** файла: и BL2, и FIP. Стоковый BL2 (и BL2 варианта
-  `default`) использует NMBM и будет портить UBI официального OpenWrt.
-- Сохраните разделы `bl2`, `u-boot-env`, `factory`, `fip` (а лучше — всю
-  флешку). `factory` — калибровка Wi-Fi и MAC-адреса, она уникальна для
-  каждого роутера.
-- Если сейчас стоит стоковая прошивка или сборка с NMBM, убедитесь, что NMBM
-  не переназначал блоки (в `dmesg` нет сообщений NMBM о bad/remapped
-  блоках). Если переназначенные блоки есть, данные лежат не по тем адресам,
-  которые видит загрузчик без NMBM, — не прошивайте.
-- Версия с NAND 512 МБ (китайская) этой сборкой не поддерживается.
+- Flash **both** files: BL2 and FIP. The stock BL2 (and the BL2 of the
+  `default` variant) uses NMBM and will corrupt the official OpenWrt UBI.
+- Back up the `bl2`, `u-boot-env`, `factory` and `fip` partitions (better:
+  the whole flash). `factory` holds the Wi-Fi calibration and MAC addresses
+  and is unique to each router.
+- If you are on stock firmware or an NMBM build, make sure NMBM has not
+  remapped any blocks (no NMBM bad/remapped block messages in `dmesg`). If
+  blocks were remapped, data is not at the addresses a non-NMBM bootloader
+  sees — do not flash.
+- The 512 MB NAND version (Chinese market) is not supported by this build.
 
-## Прошивка загрузчика
+## Flashing the bootloader
 
-### Из OpenWrt (официальный или сборка на стоковой разметке)
+### From OpenWrt (official or a stock-layout build)
 
-Скопируйте файлы на роутер в `/tmp` и проверьте имена разделов в
-`cat /proc/mtd` (`bl2`, `fip`; в некоторых сборках — `BL2`, `FIP`).
-Разделы загрузчика в OpenWrt защищены от записи, нужен модуль `mtd-rw`:
+Copy the files to `/tmp` on the router and check the partition names with
+`cat /proc/mtd` (`bl2`, `fip`; some builds use `BL2`, `FIP`). The bootloader
+partitions are write-protected in OpenWrt, so the `mtd-rw` module is needed:
 
 ```sh
 apk update && apk add kmod-mtd-rw        # OpenWrt 25.12
-# opkg update && opkg install kmod-mtd-rw # OpenWrt 24.10 и старше
+# opkg update && opkg install kmod-mtd-rw # OpenWrt 24.10 and older
 insmod mtd-rw i_want_a_brick=1
 
 cd /tmp
-sha256sum netis_nx62-SP2-*            # сверить с SHA256SUMS
+sha256sum netis_nx62-SP2-*            # compare with SHA256SUMS
 mtd write netis_nx62-SP2-fip.bin fip && mtd verify netis_nx62-SP2-fip.bin fip
 mtd write netis_nx62-SP2-bl2.img bl2 && mtd verify netis_nx62-SP2-bl2.img bl2
 ```
 
-Не перезагружайте роутер, если `mtd verify` сообщил об ошибке, — повторите
-запись.
+Do not reboot if `mtd verify` reports an error — write again.
 
-### Если уже стоит U-Boot из этого репозитория
+### If U-Boot from this repository is already installed
 
-В веб-интерфейсе восстановления: страница **U-Boot update** — файл `fip.bin`,
-страница **BL2 update** — файл `bl2.img`.
+In the failsafe web UI: **U-Boot update** page — `fip.bin`, **BL2 update**
+page — `bl2.img`.
 
-### Со стоковой прошивки
+### From stock firmware
 
-Напрямую нельзя: сначала поставьте OpenWrt по одной из известных инструкций
-(например, [SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools)),
-затем — как выше.
+Not directly: first install OpenWrt using one of the known guides (e.g.
+[SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools)),
+then proceed as above.
 
-## Вход в веб-интерфейс восстановления
+## Entering the failsafe web UI
 
-1. Выключите роутер, зажмите **Reset**, включите питание и держите кнопку
-   несколько секунд (кнопка задаётся переменной `glbtn_key`, по умолчанию
-   `reset,wps,mesh`).
-2. Подключите ПК кабелем в LAN-порт (если не открывается — попробуйте другой
-   LAN-порт). Адрес ПК выдаётся по DHCP, либо задайте `192.168.1.2/24`.
-3. Откройте **http://192.168.1.1** (или `http://failsafe.lan`).
+1. Power the router off, hold **Reset**, power it on and keep holding the
+   button for a few seconds (the button is set by the `glbtn_key` variable,
+   default `reset,wps,mesh`).
+2. Connect the PC to a LAN port with a cable (if the page doesn't open, try
+   another LAN port). The PC gets an address via DHCP, or set
+   `192.168.1.2/24` manually.
+3. Open **http://192.168.1.1** (or `http://failsafe.lan`).
 
-Веб-интерфейс открывается и автоматически, если загрузить прошивку не
-удалось.
+The web UI also opens automatically if booting the firmware fails.
 
-## Установка прошивки
+## Installing firmware
 
-На странице **Firmware update** выберите **разметку** и файл:
+On the **Firmware update** page select the **layout** and the file:
 
-| Прошивка | Разметка | Файл |
+| Firmware | Layout | File |
 | --- | --- | --- |
 | OpenWrt 24.10 / 25.12 | `openwrt` | `openwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
 | ImmortalWrt 24.10+ | `openwrt` | `immortalwrt-…-mediatek-filogic-netcore_n60-pro-squashfs-sysupgrade.itb` |
-| Сборки на стоковой разметке (Kwrt, ImmortalWrt mt798x…) | `default` | `*-squashfs-sysupgrade.bin` (tar с `kernel` и `root`) |
-| Сток из резервной копии | `default` | сырой образ UBI (`UBI#…`), снятый со стокового раздела `ubi` |
+| Stock-layout builds (Kwrt, ImmortalWrt mt798x…) | `default` | `*-squashfs-sysupgrade.bin` (tar with `kernel` and `root`) |
+| Stock from a backup | `default` | raw UBI image (`UBI#…`) taken from the stock `ubi` partition |
 
-При смене разметки раздел `ubi` полностью стирается и создаётся заново, а
-выбранная разметка сохраняется в окружении U-Boot только после успешной
-записи. Раздел `factory` при этом не трогается.
+On a layout switch the `ubi` partition is erased and recreated, and the
+selected layout is saved to the U-Boot environment only after a successful
+write. The `factory` partition is never touched.
 
-Initramfs (например, `…-initramfs-recovery.itb` OpenWrt) можно загрузить в
-память со страницы **Load initramfs** — без записи во флеш.
+An initramfs (e.g. OpenWrt `…-initramfs-recovery.itb`) can be booted from RAM
+on the **Load initramfs** page, without writing to flash.
 
-### Переключить разметку без перепрошивки
+### Switching the layout without reflashing
 
-Если прошивка нужной разметки уже записана (например, вы заменили загрузчик
-на роутере с официальным OpenWrt), в веб-интерфейсе на странице
-**Environment** задайте `mtd_layout` = `openwrt` (или `default`), сохраните и
-перезагрузитесь. Из консоли U-Boot:
+If firmware for the desired layout is already on the flash (e.g. you replaced
+the bootloader on a router running official OpenWrt), set `mtd_layout` =
+`openwrt` (or `default`) on the **Environment** page of the web UI, save and
+reboot. From the U-Boot console:
 
 ```
 setenv mtd_layout openwrt; setenv mtd_layout_label openwrt; saveenv; reset
 ```
 
-Пока переменная не задана, используется разметка `default`. На флешке с
-официальным OpenWrt U-Boot с разметкой `default` просто не сможет
-подключить UBI (он больше раздела) и откроет веб-интерфейс — данные при этом
-не меняются.
+Until the variable is set, the `default` layout is used. On a flash with
+official OpenWrt, U-Boot with the `default` layout simply fails to attach UBI
+(it is larger than the partition) and opens the web UI — no data is changed.
 
-## Возврат со «openwrt» на сток
+## Going back from `openwrt` to stock
 
-Стоковое ядро ищет таблицы NMBM в последних 8 МБ флешки, а официальный
-OpenWrt использует эту область под UBI. После OpenWrt таблиц NMBM там уже нет,
-и сток загрузится только если его ядро умеет создавать NMBM заново. Поэтому
-надёжный путь назад — **полная резервная копия флешки, снятая на стоке**
-(страница **Backup**), которую восстанавливают целиком через **Flash** или
-UART. Сборки на стоковой разметке (Kwrt, ImmortalWrt mt798x) обычно создают
-NMBM сами.
+The stock kernel looks for the NMBM tables in the last 8 MB of the flash,
+while official OpenWrt uses that area for UBI. After OpenWrt the NMBM tables
+are gone, and stock firmware only boots if its kernel can recreate NMBM. The
+reliable way back is therefore a **full flash backup taken while on stock**
+(**Backup** page), restored completely via **Flash** or UART. Stock-layout
+builds (Kwrt, ImmortalWrt mt798x) usually create NMBM themselves.
 
-## Проверка калибровки Wi-Fi (раздел `factory`)
+## Checking the Wi-Fi calibration (`factory` partition)
 
-В OpenWrt:
+On OpenWrt:
 
 ```sh
-cat /proc/mtd                      # номер раздела "factory", например mtd2
+cat /proc/mtd                      # index of the "factory" partition, e.g. mtd2
 dd if=/dev/mtd2 of=/tmp/factory.bin
-ls -l /tmp/factory.bin             # 2097152 байт
-hexdump -C -n 16 /tmp/factory.bin  # начало "86 79" (MT7986), а не "ff ff"
-hexdump -C -s 0x1fef20 -n 12 /tmp/factory.bin   # два MAC-адреса, не ff
-dmesg | grep -i eeprom             # "use default bin" = калибровки нет
-cmp /tmp/factory.bin /tmp/factory-backup.bin && echo ОДИНАКОВЫЕ
+ls -l /tmp/factory.bin             # 2097152 bytes
+hexdump -C -n 16 /tmp/factory.bin  # starts with "86 79" (MT7986), not "ff ff"
+hexdump -C -s 0x1fef20 -n 12 /tmp/factory.bin   # two MAC addresses, not ff
+dmesg | grep -i eeprom             # "use default bin" = calibration missing
+cmp /tmp/factory.bin /tmp/factory-backup.bin && echo IDENTICAL
 ```
 
-Из бэкапа всей флешки (ровно 134217728 байт) раздел вырезается так:
+From a whole-flash backup (exactly 134217728 bytes) the partition is extracted
+with:
 `dd if=full.bin of=/tmp/factory-backup.bin bs=64k skip=24 count=32`.
 
-Восстанавливать — только если отличается и бэкап правильный (2097152 байт,
-начинается с `86 79`):
+Restore only if it differs and the backup is valid (2097152 bytes, starts
+with `86 79`):
 
 ```sh
 apk update && apk add kmod-mtd-rw     # OpenWrt 24.10: opkg update && opkg install kmod-mtd-rw
