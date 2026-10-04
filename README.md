@@ -52,6 +52,10 @@ sources are downloaded at build time.
   recreate the partitions and writes the firmware into the old `ubi`
   partition. With the patch, UBI is detached on a layout switch, and the `ubi`
   partition of the new layout is erased before writing.
+- `0003` — **Layout list starts at the current layout.** In upstream the
+  layout list on the firmware page always starts at the first layout, so
+  flashing without touching it silently switches to `default` and rebuilds
+  UBI. With the patch the layout in use is preselected.
 
 **Build checks**
 
@@ -171,7 +175,9 @@ The web UI also opens automatically if booting the firmware fails.
 
 ## Installing firmware
 
-On the **Firmware update** page select the **layout** and the file:
+On the **Firmware update** page choose the file and the layout in the
+**Choose mtd layout** list (it shows `default` and `openwrt`, the layout in
+use is preselected):
 
 | Firmware | Layout | File |
 | --- | --- | --- |
