@@ -1,7 +1,7 @@
-From 0275a03777ba11ddcf2560dfd9e4dfc5f25ab1c8 Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Sun, 4 Oct 2026 20:23:18 +0000
-Subject: [PATCH] mediatek: rebuild UBI when the MTD layout is switched in
+From 7b95241c92a7214659f65ce84347280b2817e460 Mon Sep 17 00:00:00 2001
+From: derexiaon <88778718+derexiaon@users.noreply.github.com>
+Date: Sun, 4 Oct 2026 21:22:22 +0000
+Subject: [PATCH 1/2] mediatek: rebuild UBI when the MTD layout is switched in
  failsafe
 
 If UBI is still attached to the partition of the old layout (e.g. after
@@ -13,9 +13,6 @@ Detach UBI when the failsafe switches the layout and erase every UBI
 partition mounted for writing during that upgrade, so nothing of the
 previous layout (UBI with another size, NMBM blocks, stale volumes)
 survives.
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01AYm4drLdo4LK2sWwMMdxGB
 ---
  .../board/mediatek/common/mtd_helper.c        | 50 +++++++++++++++++++
  .../board/mediatek/common/mtd_helper.h        |  8 +++

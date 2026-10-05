@@ -1,0 +1,67 @@
+From c9a159ea00044adf105315969e3be1b95a77763e Mon Sep 17 00:00:00 2001
+From: derexiaon <88778718+derexiaon@users.noreply.github.com>
+Date: Sun, 4 Oct 2026 21:22:23 +0000
+Subject: [PATCH 2/2] failsafe: preselect the current MTD layout
+
+The layout list on the firmware upgrade page always starts at the first
+layout. Flashing without touching the list silently switches to that
+layout (and rebuilds UBI). Preselect the layout currently in use in all
+three web UI themes.
+---
+ .../failsafe/embedded/fsdata-bootstrap/main.js              | 6 ++++++
+ uboot-mtk-20250711/failsafe/embedded/fsdata-gl/main.js      | 5 +++++
+ uboot-mtk-20250711/failsafe/embedded/fsdata-mtk/main.js     | 5 +++++
+ 3 files changed, 16 insertions(+)
+
+diff --git a/uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/main.js b/uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/main.js
+index efd4cc24..704b4e18 100644
+--- a/uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/main.js
++++ b/uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/main.js
+@@ -1390,6 +1390,12 @@ function getmtdlayoutlist() {
+                 }
+             }
+ 
++            // Preselect the layout in use, so flashing without touching the
++            // list doesn't silently switch (and rebuild) the layout.
++            const current = layoutNames[0];
++            if (current && Array.from(layoutSelect.options).some((o) => o.value === current))
++                layoutSelect.value = current;
++
+             const layoutContainer = document.getElementById("mtd_layout");
+             if (layoutContainer) layoutContainer.style.display = hasOptions ? "" : "none";
+         },
+diff --git a/uboot-mtk-20250711/failsafe/embedded/fsdata-gl/main.js b/uboot-mtk-20250711/failsafe/embedded/fsdata-gl/main.js
+index f7f4fe96..08800f0f 100644
+--- a/uboot-mtk-20250711/failsafe/embedded/fsdata-gl/main.js
++++ b/uboot-mtk-20250711/failsafe/embedded/fsdata-gl/main.js
+@@ -63,6 +63,11 @@ function getmtdlayoutlist() {
+                     hasOptions = true;
+                 }
+             }
++            /* Preselect the layout in use */
++            for (var j = 0; j < e.options.length; j++) {
++                if (e.options[j].value === mtd_layout[0])
++                    e.selectedIndex = j;
++            }
+             document.getElementById('mtd_layout').style.display = hasOptions ? '' : 'none';
+         }
+     })
+diff --git a/uboot-mtk-20250711/failsafe/embedded/fsdata-mtk/main.js b/uboot-mtk-20250711/failsafe/embedded/fsdata-mtk/main.js
+index abab6b55..44412bb9 100644
+--- a/uboot-mtk-20250711/failsafe/embedded/fsdata-mtk/main.js
++++ b/uboot-mtk-20250711/failsafe/embedded/fsdata-mtk/main.js
+@@ -62,6 +62,11 @@ function getmtdlayoutlist() {
+                     hasOptions = true;
+                 }
+             }
++            /* Preselect the layout in use */
++            for (var j = 0; j < e.options.length; j++) {
++                if (e.options[j].value === mtd_layout[0])
++                    e.selectedIndex = j;
++            }
+             document.getElementById('mtd_layout').style.display = hasOptions ? '' : 'none';
+         }
+     })
+-- 
+2.43.0
+

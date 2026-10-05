@@ -17,45 +17,42 @@ The flash layout is selected in the web UI when flashing firmware:
 The start of the flash is the same for both layouts:
 `1024k(bl2),512k(u-boot-env),2048k(factory),2048k(fip)`.
 
-The bootloader is based on
+The board `netis_nx62` is part of
 [Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd).
-This repository contains only the NX62 board files and patches; the upstream
-sources are downloaded at build time.
+This repository builds it from upstream with two failsafe fixes that are not
+merged upstream yet; the upstream sources are downloaded at build time.
 
-## Differences from upstream bl-mt798x-dhcpd
-
-**New board `netis_nx62`**
+## The `netis_nx62` board (in upstream)
 
 - **No NMBM.** BL2 skips bad blocks (`_NAND_SKIP_BAD`) and U-Boot works on
-  the raw `spi-nand0`, like the official OpenWrt bootloader. Upstream
-  `netcore_n60-pro` (default variant) uses NMBM: on every boot it looks for the
-  NMBM tables in the last 8 MB of the flash and writes new ones if they are
-  missing, i.e. over the UBI blocks of official OpenWrt, which uses the flash
-  up to the end.
-- **Two layouts** (`default` and `openwrt`, see above) instead of a single
-  fixed one. The `default` layout never touches the NMBM area, so the stock
-  kernel keeps its NMBM tables.
-- The web UI shows the model as **Netis NX62**; LEDs match the OpenWrt DTS
-  (Wi-Fi LED on GPIO 1).
-- `MTK_FDT_BOOTARGS_FALLBACK`: if a layout has no command line, the kernel
-  gets the bootargs from its own FDT.
+  the raw `spi-nand0`, like the official OpenWrt bootloader. `netcore_n60-pro`
+  (default variant) uses NMBM: on every boot it looks for the NMBM tables in
+  the last 8 MB of the flash and writes new ones if they are missing, i.e. over
+  the UBI blocks of official OpenWrt, which uses the flash up to the end.
+- **Two layouts** (`default` and `openwrt`, see above). The `default` layout
+  never touches the NMBM area, so the stock kernel keeps its NMBM tables.
+- **TRNG for the stock kernel.** ATF 2025/2026 restricts the hardware random
+  number generator to the secure world (SMC only); the stock kernel 5.4 reads
+  the TRNG registers directly and gets hwrng errors. `_MT7986_TRNG_NS_ACCESS`
+  (enabled for NX62) keeps both direct access (stock) and SMC (OpenWrt)
+  working.
+- The web UI shows the model as **Netis NX62**; LEDs match the OpenWrt DTS.
 
-**Fixes (patches)**
+With upstream alone: `BOARD=netis_nx62 MULTI_LAYOUT=1 ./build.sh`.
 
-- `0001` — **TRNG for the stock kernel.** ATF 2025/2026 restricts the
-  hardware random number generator to the secure world (SMC only). The stock
-  kernel 5.4 reads the TRNG registers directly and gets hwrng errors. The new
-  ATF option `_MT7986_TRNG_NS_ACCESS` (enabled for NX62) keeps both direct
-  access (stock) and the SMC interface (OpenWrt) working.
-- `0002` — **Clean layout switch.** If UBI is still attached to the old
+## What this repository adds
+
+**Fixes (patches, not merged upstream yet)**
+
+- `0001` — **Clean layout switch.** If UBI is still attached to the old
   layout (for example after a failed boot attempt), upstream U-Boot cannot
   recreate the partitions and writes the firmware into the old `ubi`
   partition. With the patch, UBI is detached on a layout switch, and the `ubi`
   partition of the new layout is erased before writing.
-- `0003` — **Layout list starts at the current layout.** In upstream the
+- `0002` — **Layout list starts at the current layout.** In upstream the
   layout list on the firmware page always starts at the first layout, so
-  flashing without touching it silently switches to `default` and rebuilds
-  UBI. With the patch the layout in use is preselected.
+  flashing without touching it silently switches to `default`. With the patch
+  the layout in use is preselected (all web UI themes).
 
 **Build checks**
 
@@ -68,10 +65,7 @@ fit its partition, or a layout writes firmware to a partition other than `ubi`.
 
 | File | Purpose |
 | --- | --- |
-| `build.sh` | fetches upstream, adds the NX62 files, applies the patches, builds and verifies |
-| `board/mt7986a-netis-nx62.dts` | board description: model, layouts, LEDs |
-| `board/mt7986_netis_nx62_multi_layout_defconfig` | U-Boot config |
-| `board/atf_mt7986_netis_nx62_defconfig` | BL2/BL31 config: DDR4, SPI-NAND without NMBM, TRNG for the stock kernel |
+| `build.sh` | fetches upstream, applies the patches, builds and verifies |
 | `patches/` | fixes on top of upstream |
 | `.github/workflows/build.yml` | GitHub Actions build |
 
@@ -107,8 +101,8 @@ UPSTREAM_REF=master ./build.sh
 
 - The tested upstream commit is set by `UPSTREAM_PINNED` in `build.sh`.
 - Every Monday the workflow tries to build on the latest upstream `master`.
-  A failure means upstream changed something the patches or board files
-  depend on.
+  A failure usually means upstream merged the patches (then delete them) or
+  changed the code they touch.
 - To move to a new version: build with `upstream_ref = master`, test the
   bootloader and put the commit from `upstream-commit.txt` into
   `UPSTREAM_PINNED`.

@@ -1,8 +1,9 @@
 #!/bin/bash
 # Netis NX62 / Netcore N60 Pro bootloader (BL2 + FIP), multi-layout, no NMBM.
 #
-# Fetches upstream bl-mt798x-dhcpd, adds the NX62 board files from board/,
-# applies patches/*.patch, builds and verifies the images.
+# The board (netis_nx62) is part of upstream bl-mt798x-dhcpd. This script
+# fetches upstream, applies patches/*.patch (fixes not merged upstream yet),
+# builds and verifies the images.
 #
 # Usage:
 #   ./build.sh                      # ATF 2026.01.23 (SP2), pinned upstream
@@ -15,7 +16,7 @@ set -euo pipefail
 
 # Tested upstream commit. To update: build with UPSTREAM_REF=master, check the
 # result and put the new commit here.
-UPSTREAM_PINNED=b1aa9810e860f36a1f2cce474ce3b220e2e1e99c
+UPSTREAM_PINNED=43baf20d213a868a20efca36fbd24d1b8c12b909
 
 UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/Yuzhii0718/bl-mt798x-dhcpd}"
 UPSTREAM_REF="${UPSTREAM_REF:-$UPSTREAM_PINNED}"
@@ -42,14 +43,6 @@ git -C "$SRC" checkout -q FETCH_HEAD
 UPSTREAM_SHA="$(git -C "$SRC" rev-parse HEAD)"
 echo "upstream commit: $UPSTREAM_SHA"
 
-step "Add Netis NX62 board files"
-cp "$TOP/board/mt7986a-netis-nx62.dts" "$SRC/$UBOOT_DIR/arch/arm/dts/"
-cp "$TOP/board/mt7986_netis_nx62_multi_layout_defconfig" "$SRC/$UBOOT_DIR/configs-nonmbm/"
-for d in atf-20250711 atf-20260123; do
-	cp "$TOP/board/atf_mt7986_netis_nx62_defconfig" \
-	   "$SRC/$d/configs-nonmbm/mt7986_netis_nx62_defconfig"
-done
-
 step "Apply patches"
 for p in "$TOP"/patches/*.patch; do
 	echo "$(basename "$p")"
@@ -63,13 +56,13 @@ done
 step "Build (VERSION=$VERSION)"
 (
 	cd "$SRC"
-	BOARD=netis_nx62 VERSION="$VERSION" VARIANT=nonmbm \
+	BOARD=netis_nx62 VERSION="$VERSION" VARIANT=default \
 	MULTI_LAYOUT=1 FIXED_MTDPARTS=1 SILENT=Y ./build.sh
 )
 
 step "Verify"
-bl2=$(ls "$SRC"/output/bl2-mt7986_netis_nx62_"$VERSION"-nonmbm_*.img)
-fip=$(ls "$SRC"/output/fip-mt7986_netis_nx62_"$VERSION"-*-nonmbm-fixed-parts-multi-layout_*.bin)
+bl2=$(ls "$SRC"/output/bl2-mt7986_netis_nx62_"$VERSION"_md5-*.img)
+fip=$(ls "$SRC"/output/fip-mt7986_netis_nx62_"$VERSION"-*-fixed-parts-multi-layout_md5-*.bin)
 atf_cfg="$SRC/$ATF_DIR/build/.config"
 uboot_cfg="$SRC/$UBOOT_DIR/.config"
 
