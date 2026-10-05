@@ -155,30 +155,31 @@ mtd write netis_nx62-SP2-bl2.img bl2 && mtd verify netis_nx62-SP2-bl2.img bl2
 
 ### Со стоковой прошивки
 
-Стоковая прошивка сделана на основе OpenWrt (MediaTek SDK) и имеет SSH, но в
-её ядре нет модуля `mtd-rw`: раздел `FIP` доступен для записи, а `BL2` — только
-для чтения. Поэтому загрузчик ставится в два шага, без OpenWrt:
+Стоковая прошивка сделана на основе OpenWrt (MediaTek SDK) и имеет SSH
+(пользователь `useradmin`, пароль — заданный в веб-интерфейсе). Раздел `BL2`
+там защищён от записи, но устройство всей флешки `spi0.1` (mtd0) открыто, а
+BL2 лежит в самом его начале. Поэтому оба файла пишутся прямо со стока:
 
-1. Включите доступ по SSH (пользователь `useradmin`, см.
-   [SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools/blob/main/docs/01-SSH-CONNECTION.md))
-   и сделайте бэкап флешки (там же, `docs/02-BACKUP-MTD.md`).
-2. Запишите FIP прямо из стоковой прошивки (раздел там называется `FIP`,
-   проверьте `cat /proc/mtd`):
+```sh
+cat /proc/mtd           # ожидается: spi0.1 08000000, BL2, u-boot-env, Factory, FIP, ubi
+dmesg | grep -i nmbm    # нет сообщений о remapped/bad блоках
+# сначала бэкап, например:
+dd if=/dev/mtd0 | gzip > /tmp/mtd0_spi.bin.gz   # забрать на ПК (scp -O / WinSCP)
 
-   ```sh
-   cd /tmp
-   sha256sum netis_nx62-SP2-fip.bin      # сверить с SHA256SUMS
-   mtd write netis_nx62-SP2-fip.bin FIP && mtd verify netis_nx62-SP2-fip.bin FIP
-   ```
+cd /tmp
+ls -l netis_nx62-SP2-bl2.img          # ~150 КБ — именно он пишется в spi0.1
+sha256sum netis_nx62-SP2-*            # сверить с SHA256SUMS
+mtd write netis_nx62-SP2-bl2.img spi0.1
+mtd write netis_nx62-SP2-fip.bin FIP && mtd verify netis_nx62-SP2-fip.bin FIP
+reboot
+```
 
-3. Войдите в [веб-интерфейс восстановления](#веб-интерфейс-восстановления)
-   нового U-Boot (Reset при включении). Стоковый BL2 пока на месте и просто
-   загружает новый FIP.
-4. На странице **BL2 update** прошейте `netis_nx62-SP2-bl2.img`.
+> **В `spi0.1` пишется только образ BL2.** `spi0.1` — это вся флешка: не тот
+> или слишком большой файл затрёт `u-boot-env` и `Factory` (калибровку Wi-Fi).
 
-Не останавливайтесь после шага 2: стоковый BL2 использует NMBM и испортит UBI
-официального OpenWrt. Стоковая прошивка продолжит загружаться с разметкой
-`default`.
+После перезагрузки стоковая прошивка продолжает работать с разметкой
+`default`, а OpenWrt можно поставить из веб-интерфейса восстановления
+(разметка `openwrt`).
 
 ## Веб-интерфейс восстановления
 

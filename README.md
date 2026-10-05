@@ -151,29 +151,31 @@ page — `bl2.img`.
 
 ### From stock firmware
 
-The stock firmware is OpenWrt-based (MediaTek SDK) and has SSH, but its
-kernel has no `mtd-rw` module: the `FIP` partition is writable, `BL2` is
-read-only. So the bootloader is installed in two steps, without OpenWrt:
+The stock firmware is OpenWrt-based (MediaTek SDK) and has SSH (user
+`useradmin`, the password set in the web UI). The `BL2` partition is
+read-only there, but the whole-flash device `spi0.1` (mtd0) is writable, and
+BL2 lives at its very beginning. So both files are written right from stock:
 
-1. Enable SSH access (user `useradmin`, see
-   [SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools/blob/main/docs/01-SSH-CONNECTION.md))
-   and back up the flash (same repository, `docs/02-BACKUP-MTD.md`).
-2. Write the FIP from the stock firmware (the partition is called `FIP` there,
-   check `cat /proc/mtd`):
+```sh
+cat /proc/mtd           # expect: spi0.1 08000000, BL2, u-boot-env, Factory, FIP, ubi
+dmesg | grep -i nmbm    # no remapped/bad block messages
+# back up everything first, e.g.:
+dd if=/dev/mtd0 | gzip > /tmp/mtd0_spi.bin.gz   # copy it to the PC (scp -O / WinSCP)
 
-   ```sh
-   cd /tmp
-   sha256sum netis_nx62-SP2-fip.bin      # compare with SHA256SUMS
-   mtd write netis_nx62-SP2-fip.bin FIP && mtd verify netis_nx62-SP2-fip.bin FIP
-   ```
+cd /tmp
+ls -l netis_nx62-SP2-bl2.img          # ~150 KB — this one goes to spi0.1
+sha256sum netis_nx62-SP2-*            # compare with SHA256SUMS
+mtd write netis_nx62-SP2-bl2.img spi0.1
+mtd write netis_nx62-SP2-fip.bin FIP && mtd verify netis_nx62-SP2-fip.bin FIP
+reboot
+```
 
-3. Enter the [failsafe web UI](#failsafe-web-ui) of the new U-Boot (Reset at
-   power-on). The stock BL2 is still in place and simply loads the new FIP.
-4. On the **BL2 update** page flash `netis_nx62-SP2-bl2.img`.
+> **Only the BL2 image goes to `spi0.1`.** `spi0.1` is the whole flash: a
+> wrong or larger file written there overwrites `u-boot-env` and `Factory`
+> (the Wi-Fi calibration).
 
-Don't stop after step 2: the stock BL2 uses NMBM and would corrupt the UBI
-of official OpenWrt. The stock firmware keeps booting with the `default`
-layout.
+After the reboot the stock firmware keeps booting with the `default` layout;
+OpenWrt can be installed from the failsafe web UI (layout `openwrt`).
 
 ## Failsafe web UI
 
