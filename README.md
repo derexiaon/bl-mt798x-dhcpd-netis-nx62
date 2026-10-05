@@ -151,9 +151,29 @@ page — `bl2.img`.
 
 ### From stock firmware
 
-Not directly: first install OpenWrt using one of the known guides (e.g.
-[SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools)),
-then proceed as above.
+The stock firmware is OpenWrt-based (MediaTek SDK) and has SSH, but its
+kernel has no `mtd-rw` module: the `FIP` partition is writable, `BL2` is
+read-only. So the bootloader is installed in two steps, without OpenWrt:
+
+1. Enable SSH access (user `useradmin`, see
+   [SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools/blob/main/docs/01-SSH-CONNECTION.md))
+   and back up the flash (same repository, `docs/02-BACKUP-MTD.md`).
+2. Write the FIP from the stock firmware (the partition is called `FIP` there,
+   check `cat /proc/mtd`):
+
+   ```sh
+   cd /tmp
+   sha256sum netis_nx62-SP2-fip.bin      # compare with SHA256SUMS
+   mtd write netis_nx62-SP2-fip.bin FIP && mtd verify netis_nx62-SP2-fip.bin FIP
+   ```
+
+3. Enter the [failsafe web UI](#failsafe-web-ui) of the new U-Boot (Reset at
+   power-on). The stock BL2 is still in place and simply loads the new FIP.
+4. On the **BL2 update** page flash `netis_nx62-SP2-bl2.img`.
+
+Don't stop after step 2: the stock BL2 uses NMBM and would corrupt the UBI
+of official OpenWrt. The stock firmware keeps booting with the `default`
+layout.
 
 ## Failsafe web UI
 

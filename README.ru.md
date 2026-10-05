@@ -155,9 +155,30 @@ mtd write netis_nx62-SP2-bl2.img bl2 && mtd verify netis_nx62-SP2-bl2.img bl2
 
 ### Со стоковой прошивки
 
-Напрямую нельзя: сначала поставьте OpenWrt по одной из известных инструкций
-(например, [SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools)),
-затем — как выше.
+Стоковая прошивка сделана на основе OpenWrt (MediaTek SDK) и имеет SSH, но в
+её ядре нет модуля `mtd-rw`: раздел `FIP` доступен для записи, а `BL2` — только
+для чтения. Поэтому загрузчик ставится в два шага, без OpenWrt:
+
+1. Включите доступ по SSH (пользователь `useradmin`, см.
+   [SevenMaxs/netis-nx62-flash-tools](https://github.com/SevenMaxs/netis-nx62-flash-tools/blob/main/docs/01-SSH-CONNECTION.md))
+   и сделайте бэкап флешки (там же, `docs/02-BACKUP-MTD.md`).
+2. Запишите FIP прямо из стоковой прошивки (раздел там называется `FIP`,
+   проверьте `cat /proc/mtd`):
+
+   ```sh
+   cd /tmp
+   sha256sum netis_nx62-SP2-fip.bin      # сверить с SHA256SUMS
+   mtd write netis_nx62-SP2-fip.bin FIP && mtd verify netis_nx62-SP2-fip.bin FIP
+   ```
+
+3. Войдите в [веб-интерфейс восстановления](#веб-интерфейс-восстановления)
+   нового U-Boot (Reset при включении). Стоковый BL2 пока на месте и просто
+   загружает новый FIP.
+4. На странице **BL2 update** прошейте `netis_nx62-SP2-bl2.img`.
+
+Не останавливайтесь после шага 2: стоковый BL2 использует NMBM и испортит UBI
+официального OpenWrt. Стоковая прошивка продолжит загружаться с разметкой
+`default`.
 
 ## Веб-интерфейс восстановления
 
