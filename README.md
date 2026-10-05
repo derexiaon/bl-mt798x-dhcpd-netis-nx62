@@ -80,7 +80,9 @@ fit its partition, or a layout writes firmware to a partition other than `ubi`.
    - `SP2 + 2025` — build both.
 3. `upstream_ref` — leave empty (tested upstream commit) or set `master` to
    build on the latest upstream.
-4. *Publish a GitHub Release* additionally creates a release with the files;
+4. *Publish a GitHub Release* additionally creates a release with the files
+   (plus `netis_nx62-<version>.zip` with both images, for forums that don't
+   accept `.bin`/`.img`);
    *Delete older releases* removes the previous ones.
 5. Result — artifact `netis_nx62-bootloader-<version>`:
    - `netis_nx62-<version>-bl2.img` — BL2 (`bl2` partition);

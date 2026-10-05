@@ -133,6 +133,14 @@ jobs:
         run: |
           cd dist
           sha256sum *.img *.bin > SHA256SUMS
+          # One zip per ATF version (forums like 4PDA don't accept .bin/.img)
+          for v in $(ls netis_nx62-*-bl2.img | sed -E 's/netis_nx62-(.*)-bl2.img/\1/'); do
+            grep "netis_nx62-$v-" SHA256SUMS > "SHA256SUMS-$v"
+            zip -9 -j "netis_nx62-$v.zip" "netis_nx62-$v-bl2.img" "netis_nx62-$v-fip.bin" \
+              "SHA256SUMS-$v" README-netis-nx62.md README-netis-nx62.ru.md
+            rm "SHA256SUMS-$v"
+          done
+          unzip -l netis_nx62-SP2.zip
           echo "tag=netis-nx62-$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
           echo "upstream=$(cat upstream-commit.txt)" >> "$GITHUB_OUTPUT"
 
@@ -146,14 +154,15 @@ jobs:
             Netis NX62 / Netcore N60 Pro: BL2 + FIP, multi-layout, no NMBM, DHCP + failsafe web UI.
             Layouts: `default` (stock, ubi 117248k) and `openwrt` (official OpenWrt 25.12+ / ImmortalWrt 24.10+ netcore_n60-pro, ubi 125440k).
             Upstream bl-mt798x-dhcpd: ${{ steps.meta.outputs.upstream }}
-            Read README-netis-nx62.md before flashing.
+            Read README-netis-nx62.md before flashing. `netis_nx62-<version>.zip` = both images + checksums + README.
 
             Netis NX62 / Netcore N60 Pro: BL2 + FIP, multi-layout, без NMBM, DHCP + веб-интерфейс восстановления.
             Разметки: `default` (сток, ubi 117248k) и `openwrt` (официальный OpenWrt 25.12+ / ImmortalWrt 24.10+ netcore_n60-pro, ubi 125440k).
-            Перед прошивкой прочитайте README-netis-nx62.ru.md.
+            Перед прошивкой прочитайте README-netis-nx62.ru.md. `netis_nx62-<версия>.zip` — оба образа, контрольные суммы и README.
           files: |
             dist/*.img
             dist/*.bin
+            dist/*.zip
             dist/SHA256SUMS
             dist/README-netis-nx62.md
             dist/README-netis-nx62.ru.md
